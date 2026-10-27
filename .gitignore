@@ -1,0 +1,17 @@
+# Stackyard repo: only source, templates, scripts and docs are tracked.
+# Everything below is runtime data, tools or build output.
+
+# Tools, user data and runtime state
+/bin/
+/data/
+/logs/
+/tmp/
+/www/
+/backup/
+/config/
+
+# Release build copied here for testing
+/Stackyard.exe
+
+# Editor
+*.code-workspace
