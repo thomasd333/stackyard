@@ -9,6 +9,7 @@ use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::applog;
 use crate::confgen;
+use crate::downloads::{Downloads, Job, Updates};
 use crate::env_path::{self, UserPath};
 use crate::paths;
 use crate::services::{self, ServiceInfo, Services};
@@ -349,6 +350,64 @@ pub fn open_terminal() -> CmdResult<()> {
             Err(e)
         }
     }
+}
+
+/// Fetches the versions available for download (network, runs off the main thread).
+#[tauri::command]
+pub async fn check_updates(downloads: State<'_, Arc<Downloads>>) -> CmdResult<Updates> {
+    let downloads = Arc::clone(&downloads);
+    tauri::async_runtime::spawn_blocking(move || downloads.check()).await.map_err(|e| e.to_string())
+}
+
+/// Offers from the last check against what is installed now (no network); None before the first check.
+#[tauri::command]
+pub async fn get_updates(downloads: State<'_, Arc<Downloads>>) -> CmdResult<Option<Updates>> {
+    let downloads = Arc::clone(&downloads);
+    tauri::async_runtime::spawn_blocking(move || downloads.updates()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn download_tool(id: String, version: String, downloads: State<Arc<Downloads>>) -> CmdResult<Option<Job>> {
+    downloads.start(&id, &version)?;
+    Ok(downloads.job())
+}
+
+#[tauri::command]
+pub fn get_download(downloads: State<Arc<Downloads>>) -> Option<Job> {
+    downloads.job()
+}
+
+#[tauri::command]
+pub fn dismiss_download(downloads: State<Arc<Downloads>>) {
+    downloads.dismiss();
+}
+
+/// Grows the window so `content_height` (CSS px) fits without scrolling, but never past the screen's
+/// work area (taskbar excluded); moves it up when the bottom would end up off screen.
+#[tauri::command]
+pub fn fit_window(window: tauri::WebviewWindow, content_height: f64) -> CmdResult<()> {
+    let err = |e: tauri::Error| e.to_string();
+    let Some(monitor) = window.current_monitor().map_err(err)? else { return Ok(()) };
+    let inner = window.inner_size().map_err(err)?;
+    let outer = window.outer_size().map_err(err)?;
+    let chrome = outer.height.saturating_sub(inner.height);
+    let area = monitor.work_area();
+
+    let wanted = (content_height * window.scale_factor().map_err(err)?).ceil() as u32;
+    let height = wanted.min(area.size.height.saturating_sub(chrome));
+    if height <= inner.height {
+        return Ok(());
+    }
+    window.set_size(tauri::PhysicalSize::new(inner.width, height)).map_err(err)?;
+
+    let pos = window.outer_position().map_err(err)?;
+    let bottom = area.position.y + area.size.height as i32;
+    let outer_height = (height + chrome) as i32;
+    if pos.y + outer_height > bottom {
+        let y = (bottom - outer_height).max(area.position.y);
+        window.set_position(tauri::PhysicalPosition::new(pos.x, y)).map_err(err)?;
+    }
+    Ok(())
 }
 
 /// Exits the app (services are stopped on `RunEvent::Exit`).

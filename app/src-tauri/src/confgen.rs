@@ -237,7 +237,7 @@ pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, port: u16) -> Gen
 
 /// File names of the SQL Server driver DLLs built for this PHP (same major.minor, x64, TS or NTS),
 /// e.g. `php_pdo_sqlsrv_83_ts_x64.dll` for `bin\php\php-8.3.33-Win32-vs16-x64`.
-fn sqlsrv_extensions(php_dir: &Path) -> Vec<String> {
+pub(crate) fn sqlsrv_extensions(php_dir: &Path) -> Vec<String> {
     let label = php_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let Some(version) = major_minor(&label) else { return Vec::new() };
     let thread_safe = fs::read_dir(php_dir).into_iter().flatten().flatten().any(|e| {

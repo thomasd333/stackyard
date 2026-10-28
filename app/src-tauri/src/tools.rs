@@ -91,7 +91,7 @@ impl ToolDef {
 }
 
 /// Compares strings treating digit runs as numbers, so "php-8.10" > "php-8.9".
-fn natural_cmp(a: &str, b: &str) -> Ordering {
+pub(crate) fn natural_cmp(a: &str, b: &str) -> Ordering {
     let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
     loop {
         match (a.peek(), b.peek()) {

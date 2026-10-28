@@ -33,6 +33,33 @@ interface AppState {
   terminal: TerminalInfo;
 }
 
+interface Offer {
+  version: string;
+  lts: boolean;
+  updates: string | null;
+}
+
+interface Updates {
+  offers: Record<string, Offer[]>;
+  errors: string[];
+}
+
+type JobPhase = "downloading" | "verifying" | "extracting" | "done" | "error";
+
+interface Job {
+  tool: string;
+  version: string;
+  phase: JobPhase;
+  bytes: number;
+  total: number | null;
+  message: string | null;
+  label: string | null;
+  copiedFrom: string | null;
+  copied: string[];
+  sqlsrvMissing: boolean;
+  backup: string | null;
+}
+
 type ServiceStatus = "stopped" | "starting" | "running" | "stopping" | "error";
 
 interface ServiceInfo {
@@ -51,6 +78,11 @@ let state: AppState | null = null;
 let services: ServiceInfo[] = [];
 let busy = false;
 let notice: { kind: "info" | "error"; text: string } | null = null;
+let updates: Updates | null = null;
+let checking = false;
+let job: Job | null = null;
+/** Offer picked in each tool's download list, kept across re-renders. */
+const chosenOffer: Record<string, string> = {};
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -103,6 +135,125 @@ function schedulePoll() {
       schedulePoll();
     }
   }, transitioning ? 400 : 2000);
+}
+
+const jobActive = (j: Job | null) => !!j && j.phase !== "done" && j.phase !== "error";
+
+async function checkUpdates() {
+  if (checking) return;
+  checking = true;
+  render();
+  try {
+    updates = await invoke<Updates>("check_updates");
+    const count = Object.values(updates.offers)
+      .flat()
+      .filter((o) => o.updates).length;
+    notice = updates.errors.length
+      ? { kind: "error", text: t("checkFailed", { errors: updates.errors.join("\n") }) }
+      : { kind: "info", text: count ? t("updatesFound", { count }) : t("upToDate") };
+  } catch (e) {
+    notice = { kind: "error", text: String(e) };
+  } finally {
+    checking = false;
+    render();
+  }
+}
+
+async function startDownload(tool: string) {
+  const version = chosenOffer[tool] ?? updates?.offers[tool]?.[0]?.version;
+  if (!version) return;
+  try {
+    job = await invoke<Job | null>("download_tool", { id: tool, version });
+  } catch (e) {
+    notice = { kind: "error", text: String(e) };
+  }
+  render();
+  pollJob();
+}
+
+/** Follows a running download; when it ends, reloads the tools and the offers. */
+function pollJob() {
+  if (!jobActive(job)) return;
+  window.setTimeout(async () => {
+    try {
+      job = await invoke<Job | null>("get_download");
+      if (!jobActive(job)) {
+        state = await invoke<AppState>("get_state");
+        updates = await invoke<Updates | null>("get_updates");
+      }
+    } catch (e) {
+      notice = { kind: "error", text: String(e) };
+    }
+    render();
+    pollJob();
+  }, 400);
+}
+
+async function dismissJob() {
+  await invoke("dismiss_download");
+  job = null;
+  render();
+}
+
+const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+
+const phaseLabel = { downloading: "dlDownloading", verifying: "dlVerifying", extracting: "dlExtracting" } as const;
+
+/** Download progress/result for this tool, or the list of versions available to download. */
+function downloadLine(tool: ToolInfo): string {
+  if (job && job.tool === tool.id) {
+    const what = `${tool.name} ${job.version}`;
+    if (job.phase === "error") {
+      return `
+        <div class="tool-extra">
+          <pre class="svc-message error">${esc(job.message ?? "")}</pre>
+          <button class="link" data-action="dismiss_job">${esc(t("dismiss"))}</button>
+        </div>`;
+    }
+    if (job.phase === "done") {
+      const lines = [t("dlDone", { what })];
+      if (job.copied.length) lines.push(t("dlCopied", { from: job.copiedFrom ?? "", files: job.copied.join(", ") }));
+      if (job.sqlsrvMissing) lines.push(t("dlSqlsrvMissing", { series: job.version.split(".").slice(0, 2).join(".") }));
+      if (job.backup) lines.push(t("dlComposerActive", { backup: job.backup }));
+      else if (job.label && job.label !== tool.selected) lines.push(t("dlSelectHint"));
+      const use =
+        job.label && job.label !== tool.selected
+          ? `<button class="primary" data-use="${tool.id}" data-label="${esc(job.label)}" ${busy ? "disabled" : ""}>${esc(
+              t("dlUse", { version: job.version }),
+            )}</button>`
+          : "";
+      return `
+        <div class="tool-extra">
+          <pre class="svc-message ${job.sqlsrvMissing ? "warn" : ""}">${esc(lines.join("\n"))}</pre>
+          ${use}
+          <button class="link" data-action="dismiss_job">${esc(t("dismiss"))}</button>
+        </div>`;
+    }
+    const size = job.total ? `${mb(job.bytes)} / ${mb(job.total)} MB` : `${mb(job.bytes)} MB`;
+    return `
+      <div class="tool-extra">
+        <span class="progress">${esc(t(phaseLabel[job.phase], { what }))}${job.phase === "downloading" ? ` ${esc(size)}` : ""}</span>
+      </div>`;
+  }
+
+  const offers = updates?.offers[tool.id];
+  if (!offers?.length) return "";
+  const chosen = offers.some((o) => o.version === chosenOffer[tool.id]) ? chosenOffer[tool.id] : offers[0].version;
+  const options = offers
+    .map((o) => {
+      const label = [o.version, o.lts ? "LTS" : "", o.updates ? t("dlUpdates", { version: o.updates }) : ""]
+        .filter(Boolean)
+        .join(" · ");
+      return `<option value="${esc(o.version)}" ${o.version === chosen ? "selected" : ""}>${esc(label)}</option>`;
+    })
+    .join("");
+  const hasUpdate = offers.some((o) => o.updates);
+  return `
+    <div class="tool-extra">
+      ${hasUpdate ? `<span class="tag ours">${esc(t("updateAvailable"))}</span>` : `<span class="muted">${esc(t("dlOther"))}</span>`}
+      <select data-offer="${tool.id}" class="narrow">${options}</select>
+      <button data-download="${tool.id}" ${jobActive(job) ? "disabled" : ""}>${esc(t("download"))}</button>
+    </div>`;
 }
 
 const statusLabel = {
@@ -166,6 +317,7 @@ function toolRow(tool: ToolInfo): string {
         <span class="slider"></span>
         <span class="switch-label">PATH</span>
       </label>
+      ${downloadLine(tool)}
     </li>`;
 }
 
@@ -269,6 +421,8 @@ function render() {
       <div class="section-head">
         <h2>${esc(t("tools"))}</h2>
         <div class="actions">
+          <button data-action="check_updates" ${checking ? "disabled" : ""} title="${esc(t("checkUpdatesHint"))}">
+            ${esc(t(checking ? "checking" : "checkUpdates"))}</button>
           <button data-action="add_all" ${dis}>${esc(t("addAllToPath"))}</button>
           <button data-action="remove_all" ${dis}>${esc(t("removeAllFromPath"))}</button>
         </div>
@@ -293,6 +447,17 @@ app.addEventListener("click", (ev) => {
   if (svc) {
     return serviceCmd(svc.dataset.svcAction === "stop" ? "stop_service" : "start_service", { id: svc.dataset.svc });
   }
+  const download = target.closest<HTMLElement>("[data-download]")?.dataset.download;
+  if (download) {
+    return startDownload(download);
+  }
+  const use = target.closest<HTMLElement>("[data-use]");
+  if (use) {
+    const tool = state?.tools.find((x) => x.id === use.dataset.use);
+    return run("set_tool_version", { id: use.dataset.use, version: use.dataset.label }, tool?.inPath ?? false).then(
+      dismissJob,
+    );
+  }
   const open = target.closest<HTMLElement>("[data-open]")?.dataset.open;
   if (open) {
     return run("open_location", { target: open });
@@ -310,6 +475,10 @@ app.addEventListener("click", (ev) => {
       return run("set_all_in_path", { enabled: false }, true);
     case "terminal":
       return openTerminal();
+    case "check_updates":
+      return checkUpdates();
+    case "dismiss_job":
+      return dismissJob();
     case "quit":
       return invoke("quit");
     case "dismiss":
@@ -357,7 +526,9 @@ app.addEventListener("input", (ev) => {
 app.addEventListener("change", (ev) => {
   const el = ev.target as HTMLInputElement | HTMLSelectElement;
   const term = el.dataset.terminal;
-  if (term === "shell") {
+  if (el.dataset.offer) {
+    chosenOffer[el.dataset.offer] = el.value;
+  } else if (term === "shell") {
     setTerminal({ shell: el.value });
   } else if (term === "wt") {
     setTerminal({ windowsTerminal: (el as HTMLInputElement).checked });
@@ -370,13 +541,24 @@ app.addEventListener("change", (ev) => {
 });
 
 render();
-Promise.all([invoke<AppState>("get_state"), invoke<ServiceInfo[]>("get_services")])
-  .then(([s, svcs]) => {
+// The download job and the last check survive a window reload (they live in the backend).
+Promise.all([
+  invoke<AppState>("get_state"),
+  invoke<ServiceInfo[]>("get_services"),
+  invoke<Job | null>("get_download"),
+  invoke<Updates | null>("get_updates"),
+])
+  .then(([s, svcs, j, u]) => {
     state = s;
     services = svcs;
+    job = j;
+    updates = u;
+    pollJob();
   })
   .catch((e) => (notice = { kind: "error", text: String(e) }))
   .finally(() => {
     render();
     schedulePoll();
+    // Make the window tall enough for everything on the first view (limited to the screen).
+    invoke("fit_window", { contentHeight: document.documentElement.scrollHeight }).catch(() => {});
   });

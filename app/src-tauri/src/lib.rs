@@ -1,6 +1,7 @@
 mod applog;
 mod commands;
 mod confgen;
+mod downloads;
 mod env_path;
 mod paths;
 mod ports;
@@ -36,6 +37,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_window(app)))
         .manage(commands::VersionCache::default())
         .manage(Arc::new(services::Services::default()))
+        .manage(Arc::new(downloads::Downloads::default()))
         .setup(|app| {
             tray::setup(app.handle())?;
             Ok(())
@@ -61,6 +63,12 @@ pub fn run() {
             commands::open_location,
             commands::set_terminal,
             commands::open_terminal,
+            commands::check_updates,
+            commands::get_updates,
+            commands::download_tool,
+            commands::get_download,
+            commands::dismiss_download,
+            commands::fit_window,
             commands::quit,
         ])
         .build(tauri::generate_context!())
