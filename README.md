@@ -25,6 +25,16 @@ Do budowania potrzebne są Rust (rustup), MSVC Build Tools (C++) i Node. Jeśli 
 `cargo: program not found`, dopisz cargo do PATH w tej samej sesji:
 `$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"` (`npm run release` robi to sam).
 
+## Test na czystym Windowsie
+
+```
+npm run sandbox
+```
+
+Otwiera Windows Sandbox z najnowszym zipem z `release\`, rozpakowuje go do `C:\Stackyard` i uruchamia.
+Sandbox to czysty Windows (bez VC++ Redistributable, bez Twoich ustawień), a po zamknięciu okna
+wszystko znika. Wymaga włączonej funkcji „Piaskownica systemu Windows” (Windows Pro).
+
 ## Release (paczka do udostępnienia)
 
 ```

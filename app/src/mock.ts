@@ -30,7 +30,8 @@ const state = {
   siteSuggestions: ["www\\shop\\public", "www\\shop", "www\\blog"],
   mainUrl: "http://localhost/",
   ports: { apache: 80, mysql: 3306 },
-  version: "0.6.0",
+  startup: { withWindows: false, restoreServices: true },
+  version: "0.7.0",
   settingsRecovered: null as string | null,
   ui: { theme: "system", language: "system", locale: "en", systemLocale: "en" },
 };
@@ -86,6 +87,10 @@ const handlers: Record<string, (a: Args) => unknown> = {
     state.ui.theme = a.theme;
     state.ui.language = a.language;
     state.ui.locale = a.language === "system" ? state.ui.systemLocale : a.language;
+    return state;
+  },
+  set_startup: (a) => {
+    state.startup = { withWindows: a.withWindows, restoreServices: a.restoreServices };
     return state;
   },
   set_ports: (a) => {

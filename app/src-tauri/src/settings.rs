@@ -18,6 +18,12 @@ pub struct Settings {
     pub terminal: Terminal,
     #[serde(default)]
     pub ui: Ui,
+    #[serde(default)]
+    pub startup: Startup,
+    /// Services the user left running (started and not stopped by hand); restored at launch when
+    /// `startup.restore_services` is on. Quitting Stackyard does not clear it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub running: Vec<String>,
     /// Virtual hosts, in the order they were added.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sites: Vec<Site>,
@@ -57,6 +63,15 @@ impl Default for Terminal {
     fn default() -> Self {
         Self { shell: "cmd".into(), windows_terminal: true, custom: String::new() }
     }
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Startup {
+    /// Launch Stackyard (hidden in the tray) when the user signs in to Windows (see `autostart.rs`).
+    pub with_windows: bool,
+    /// Start the services in `Settings::running` when Stackyard launches.
+    pub restore_services: bool,
 }
 
 /// Appearance. Plain strings like `Terminal::shell`; unknown values mean "system".

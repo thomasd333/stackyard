@@ -93,6 +93,7 @@ impl Services {
         }
 
         applog::info(format!("{id}: starting"));
+        remember(id, true);
         let me = Arc::clone(self);
         std::thread::spawn(move || {
             let result = me.launch(id);
@@ -112,6 +113,7 @@ impl Services {
     }
 
     pub fn stop(self: &Arc<Self>, id: &'static str) {
+        remember(id, false);
         let Some(proc) = self.take_for_stop(id) else {
             // Stopping a failed service just clears its error.
             let mut slots = self.slots.lock().unwrap();
@@ -336,6 +338,26 @@ fn ensure_shutdown_account(mysql_dir: &Path, port: u16) {
         applog::info(format!("mysql: shutdown account {SHUTDOWN_USER} set up"));
     } else {
         applog::warn("mysql: cannot set up the shutdown account (root has a password?); stop falls back to root");
+    }
+}
+
+/// Records that the user left `id` running (or stopped it), for "restore services at launch".
+/// `stop_all_blocking` on quit doesn't come through here, so quitting keeps the list.
+fn remember(id: &str, running: bool) {
+    if cfg!(test) {
+        return;
+    }
+    let mut settings = Settings::load();
+    if settings.running.iter().any(|x| x == id) == running {
+        return;
+    }
+    if running {
+        settings.running.push(id.to_string());
+    } else {
+        settings.running.retain(|x| x != id);
+    }
+    if let Err(e) = settings.save() {
+        applog::warn(format!("Cannot save the running services: {e}"));
     }
 }
 

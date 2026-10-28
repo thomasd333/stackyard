@@ -1,4 +1,5 @@
 mod applog;
+mod autostart;
 mod commands;
 mod confgen;
 mod downloads;
@@ -41,8 +42,21 @@ pub fn run() {
         .manage(Arc::new(services::Services::default()))
         .manage(Arc::new(downloads::Downloads::default()))
         .setup(|app| {
-            i18n::apply_theme(app.handle(), &settings::Settings::load().ui.theme);
+            let settings = settings::Settings::load();
+            i18n::apply_theme(app.handle(), &settings.ui.theme);
+            autostart::sync(&settings);
             tray::setup(app.handle())?;
+            // The window starts hidden (tauri.conf.json); at sign-in Stackyard stays in the tray.
+            if !autostart::launched_at_sign_in() {
+                tray::show_window(app.handle());
+            }
+            if settings.startup.restore_services {
+                let services = app.state::<Arc<services::Services>>();
+                for (id, _) in services::SERVICES.iter().filter(|(id, _)| settings.running.iter().any(|r| r == id)) {
+                    applog::info(format!("{id}: restoring (it was running when Stackyard last closed)"));
+                    services.start(id);
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -67,6 +81,7 @@ pub fn run() {
             commands::set_terminal,
             commands::set_ui,
             commands::set_ports,
+            commands::set_startup,
             commands::open_terminal,
             commands::add_site,
             commands::remove_site,

@@ -623,3 +623,12 @@ button.primary {
 .tool-extra .progress {
   color: var(--muted);
 }
+
+/* Settings: on/off options with their explanation under the label (34px switch + 8px gap). */
+.option + .option {
+  margin-top: 10px;
+}
+
+.option .hint {
+  margin: 2px 0 0 42px;
+}

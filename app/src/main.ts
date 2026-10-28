@@ -45,6 +45,7 @@ interface AppState {
   mainUrl: string;
   ui: UiInfo;
   ports: { apache: number; mysql: number };
+  startup: { withWindows: boolean; restoreServices: boolean };
   version: string;
   /** Parse error of a settings.json that was set aside and replaced (sent once). */
   settingsRecovered: string | null;
@@ -528,7 +529,20 @@ function sitesTab(s: AppState, apacheRunning: boolean, dis: string): string {
     </section>`;
 }
 
-const themeLabel = { system: "themeSystem", light: "themeLight", dark: "themeDark" } as const;
+/** A labelled on/off switch for one of the startup options, with its explanation underneath. */
+function toggle(option: string, on: boolean, label: string, hint: string, dis: string): string {
+  return `
+    <div class="option">
+      <label class="switch">
+        <input type="checkbox" data-startup="${option}" ${on ? "checked" : ""} ${dis} />
+        <span class="slider"></span>
+        <span class="switch-label">${esc(label)}</span>
+      </label>
+      <p class="hint">${esc(hint)}</p>
+    </div>`;
+}
+
+const themeLabel ={ system: "themeSystem", light: "themeLight", dark: "themeDark" } as const;
 
 function settingsTab(s: AppState, dis: string): string {
   const option = (value: string, label: string, selected: string) =>
@@ -565,6 +579,14 @@ function settingsTab(s: AppState, dis: string): string {
           <span>${esc(t("language"))}</span>
           <select data-ui="language" class="narrow" ${dis}>${languages}</select>
         </label>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>${esc(t("startup"))}</h2></div>
+      <div class="options">
+        ${toggle("withWindows", s.startup.withWindows, t("startWithWindows"), t("startWithWindowsHint"), dis)}
+        ${toggle("restoreServices", s.startup.restoreServices, t("restoreServices"), t("restoreServicesHint"), dis)}
       </div>
     </section>
 
@@ -828,7 +850,9 @@ app.addEventListener("input", (ev) => {
 app.addEventListener("change", (ev) => {
   const el = ev.target as HTMLInputElement | HTMLSelectElement;
   const term = el.dataset.terminal;
-  if (el.dataset.ui && state) {
+  if (el.dataset.startup && state) {
+    run("set_startup", { ...state.startup, [el.dataset.startup]: (el as HTMLInputElement).checked });
+  } else if (el.dataset.ui && state) {
     const { theme, language } = state.ui;
     run("set_ui", el.dataset.ui === "theme" ? { theme: el.value, language } : { theme, language: el.value });
   } else if (el.dataset.offer) {

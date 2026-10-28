@@ -3,7 +3,8 @@ Stackyard {{VERSION}} - portable local dev stack for Windows 10/11 (x64)
 
 Apache, PHP, MySQL, Node.js, Composer, Git and Python in one folder, with a small window (and a tray
 icon) to start/stop services, switch versions, manage the PATH and add local sites. Everything,
-settings included, stays inside this folder. The window is in English or Polish (Settings tab).
+settings included, stays inside this folder. The window is in English, German, Spanish, French,
+Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
 
 
 1. INSTALL
@@ -31,6 +32,8 @@ settings included, stays inside this folder. The window is in English or Polish 
   git...). Open a new terminal afterwards. "Open terminal" in the Services tab works without that.
 - Closing the window keeps Stackyard and its services running in the tray (icon next to the clock).
   Use Quit to exit.
+- Settings tab > Startup: start Stackyard when you sign in to Windows, and restore the services that
+  were running when it was closed.
 
 
 3. COMING FROM LARAGON (or XAMPP)

@@ -8,6 +8,7 @@ use tauri::State;
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::applog;
+use crate::autostart;
 use crate::confgen;
 use crate::downloads::{Downloads, Job, Updates};
 use crate::env_path::{self, UserPath};
@@ -60,10 +61,18 @@ pub struct AppState {
     main_url: String,
     ui: UiInfo,
     ports: settings::Ports,
+    startup: StartupInfo,
     /// Stackyard's own version, shown in the header.
     version: &'static str,
     /// Parse error of a settings.json that was set aside and replaced (shown once).
     settings_recovered: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupInfo {
+    with_windows: bool,
+    restore_services: bool,
 }
 
 #[derive(Serialize)]
@@ -194,6 +203,10 @@ fn build_state(cache: &VersionCache) -> CmdResult<AppState> {
         site_suggestions: sites::suggestions(),
         main_url: sites::url(None, settings.ports.apache),
         ports: settings::Ports { apache: settings.ports.apache, mysql: settings.ports.mysql },
+        startup: StartupInfo {
+            with_windows: settings.startup.with_windows,
+            restore_services: settings.startup.restore_services,
+        },
         version: env!("CARGO_PKG_VERSION"),
         settings_recovered: settings::take_recovery(),
         ui: UiInfo {
@@ -379,6 +392,17 @@ pub fn set_terminal(
     let mut settings = Settings::load();
     settings.terminal = settings::Terminal { shell, windows_terminal, custom: custom.trim().to_string() };
     settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    build_state(&cache)
+}
+
+/// Saves the startup options and adds or removes the Windows sign-in entry.
+#[tauri::command]
+pub fn set_startup(with_windows: bool, restore_services: bool, cache: State<VersionCache>) -> CmdResult<AppState> {
+    autostart::set(with_windows).map_err(|e| format!("Cannot change the Windows startup entry: {e}"))?;
+    let mut settings = Settings::load();
+    settings.startup = settings::Startup { with_windows, restore_services };
+    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    applog::info(format!("Startup: with Windows {with_windows}, restore services {restore_services}"));
     build_state(&cache)
 }
 
