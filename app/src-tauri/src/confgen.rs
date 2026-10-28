@@ -105,11 +105,21 @@ fn php_preloads(php_dir: &Path, apache_dir: &Path) -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| {
             let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-            name.ends_with(".dll") && !name.ends_with("apache2_4.dll") && apache_bin.join(&name).is_file()
+            name.ends_with(".dll")
+                && !name.ends_with("apache2_4.dll")
+                && !is_vc_runtime(&name)
+                && apache_bin.join(&name).is_file()
         })
         .collect();
     dlls.sort();
     dependency_order(dlls)
+}
+
+/// The Visual C++ runtime (vcruntime140*.dll, msvcp140*.dll), which release zips put next to Apache, PHP
+/// and MySQL so they run without the redistributable. httpd.exe has already loaded Apache's copy, and
+/// newer runtimes serve older builds, so preloading PHP's copy would only add a second one.
+fn is_vc_runtime(name: &str) -> bool {
+    ["vcruntime", "msvcp", "concrt", "vccorlib"].iter().any(|p| name.starts_with(p))
 }
 
 /// Orders DLLs so each comes after the DLLs (from the same set) it imports. Otherwise e.g. libpq.dll,

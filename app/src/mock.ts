@@ -31,7 +31,7 @@ const state = {
   mainUrl: "http://localhost/",
   ports: { apache: 80, mysql: 3306 },
   startup: { withWindows: false, restoreServices: true },
-  version: "0.7.0",
+  version: "0.7.1",
   settingsRecovered: null as string | null,
   ui: { theme: "system", language: "system", locale: "en", systemLocale: "en" },
 };

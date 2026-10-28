@@ -15,10 +15,9 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
   letters such as a-ogonek, o-acute or z-dot are not: PHP and MySQL cannot handle them).
 - Run Stackyard.exe. It is not code-signed, so SmartScreen may say "Windows protected your PC":
   click "More info" > "Run anyway".
-- Needed (usually already installed):
-    Microsoft Edge WebView2 Runtime (built into Windows 11)
-    Microsoft Visual C++ 2015-2022 Redistributable x64: https://aka.ms/vs/17/release/vc_redist.x64.exe
-  If Apache or MySQL fails with a "DLL not found" message, install the second one.
+- Nothing else to install: the Visual C++ runtime that Apache, PHP and MySQL need is included next
+  to them. The window uses Microsoft Edge WebView2, which is part of Windows 11 (and of an up-to-date
+  Windows 10 with Edge).
 
 
 2. FIRST STEPS

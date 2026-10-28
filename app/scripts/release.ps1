@@ -147,6 +147,26 @@ Put tools here, one folder per tool, optionally with version subfolders:
             Copy-Tree $v.FullName "$out\bin\$id\$($v.Name)"
         }
     }
+
+    # Apache, PHP and MySQL need the Visual C++ runtime. App-local copies (which Microsoft allows to
+    # redistribute) let the zip run on a PC without the Visual C++ Redistributable. They come from this
+    # PC's System32, so keep its redistributable up to date.
+    Step "Adding the Visual C++ runtime"
+    $runtime = 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll'
+    $minimum = [version]'14.50'   # Apache Lounge VS18 builds need at least the VS 2026 runtime
+    foreach ($f in $runtime) {
+        $src = "$env:SystemRoot\System32\$f"
+        if (-not (Test-Path $src)) { throw "$f is missing. Install the Visual C++ Redistributable (x64): https://aka.ms/vs/17/release/vc_redist.x64.exe" }
+        $v = [version]((Get-Item $src).VersionInfo.FileVersion -replace '[^\d.].*$', '')
+        if ($v -lt $minimum) { throw "$f is $v, older than $minimum. Update the Visual C++ Redistributable (x64): https://aka.ms/vs/17/release/vc_redist.x64.exe" }
+    }
+    Write-Host "  version $v"
+    $targets = @(Get-Item "$out\bin\apache\*\bin", "$out\bin\php\*", "$out\bin\mysql\*\bin" -ErrorAction SilentlyContinue)
+    foreach ($t in $targets) {
+        # A copy the tool ships itself is left alone.
+        foreach ($f in $runtime) { if (-not (Test-Path "$t\$f")) { Copy-Item "$env:SystemRoot\System32\$f" $t } }
+        Write-Host "  $($t.FullName.Substring($out.Length + 1))"
+    }
 }
 
 # CRLF so Notepad on older Windows shows the lines.

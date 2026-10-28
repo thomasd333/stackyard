@@ -50,6 +50,11 @@ tworzy zip i plik `.sha256`.
 W zipie jest `README.txt` dla odbiorcy, generowany z `app\scripts\README-release.txt`: instalacja,
 SmartScreen, przejście z Laragona, PATH i logi.
 
+Do folderów Apache, PHP i MySQL w paczce trafia też runtime Visual C++ (`vcruntime140.dll`,
+`vcruntime140_1.dll`, `msvcp140.dll`), więc u odbiorcy nie trzeba nic instalować. Pliki są kopiowane
+z `C:\Windows\System32` Twojego komputera, dlatego trzymaj VC++ Redistributable aktualny. Skrypt
+przerwie release, jeśli wersja będzie za stara.
+
 **Do paczki nie trafia** nic z Twojego komputera: `www\`, `data\` (bazy MySQL), `config\`, `logs\`,
 `tmp\`, `backup\`, a z `bin\` także wygenerowane `php.ini`, logi Apache itp. Na końcu skrypt przeszukuje
 paczkę pod kątem ścieżek `D:\SERVER`, Twojego folderu użytkownika, Laragona i danych z gita. Jeśli coś
