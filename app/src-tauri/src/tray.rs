@@ -64,16 +64,15 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     menu.append(&separator()?)?;
     menu.append(get("quit"))?;
 
-    let mut builder = TrayIconBuilder::with_id("main")
+    // A 32 px image drawn for small sizes (icons\source\icon-32.svg); the window icon downscales badly.
+    let tray = TrayIconBuilder::with_id("main")
+        .icon(tauri::include_image!("icons/tray.png"))
         .tooltip("Stackyard")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(on_menu_event)
-        .on_tray_icon_event(on_tray_event);
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
-    }
-    let tray = builder.build(app)?;
+        .on_tray_icon_event(on_tray_event)
+        .build(app)?;
 
     let app = app.clone();
     let items = Items { services, fixed, sites };
