@@ -108,6 +108,14 @@ export const pl: Messages = {
   startApacheFirst: "Uruchom Apache, aby otworzyć ten adres",
   folders: "Foldery",
   folderHint: "Otwórz w Eksploratorze: {path}",
+  ports: "Porty",
+  portApache: "Apache (HTTP)",
+  portMysql: "MySQL",
+  save: "Zapisz",
+  portsHint:
+    "Zmień je, gdy inny program (np. Laragon, XAMPP, IIS) zajmuje już port 80 lub 3306. Działająca usługa zrestartuje się na nowym porcie.",
+  settingsRecovered:
+    "Nie udało się odczytać config\\settings.json ({error}). Zachowano go jako settings.json.broken i przywrócono ostatnie poprawne ustawienia.",
   quit: "Zakończ",
   quitHint: "Zatrzymaj wszystkie usługi i zamknij program",
 };

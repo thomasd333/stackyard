@@ -70,8 +70,8 @@ impl Drop for Job {
 pub enum Stop {
     /// Named event set to request shutdown (Apache's `ap<pid>_shutdown`).
     Event(String),
-    /// Command requesting shutdown (e.g. `mysqladmin shutdown`).
-    Command(Command),
+    /// Commands requesting shutdown (e.g. `mysqladmin shutdown`), tried in order until one succeeds.
+    Commands(Vec<Command>),
 }
 
 /// A running service process together with the job that owns its process tree.
@@ -112,10 +112,10 @@ impl Proc {
     pub fn shutdown(mut self, timeout: Duration) -> bool {
         let requested = match self.stop.take() {
             Some(Stop::Event(name)) => signal_event(&name),
-            Some(Stop::Command(mut cmd)) => {
+            Some(Stop::Commands(cmds)) => cmds.into_iter().any(|mut cmd| {
                 cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW);
                 cmd.status().is_ok_and(|s| s.success())
-            }
+            }),
             None => false,
         };
         if requested && self.wait_for_exit(timeout) {

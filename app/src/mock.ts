@@ -29,6 +29,9 @@ const state = {
   sites: [] as { name: string; host: string; root: string; url: string; exists: boolean }[],
   siteSuggestions: ["www\\shop\\public", "www\\shop", "www\\blog"],
   mainUrl: "http://localhost/",
+  ports: { apache: 80, mysql: 3306 },
+  version: "0.6.0",
+  settingsRecovered: null as string | null,
   ui: { theme: "system", language: "system", locale: "en", systemLocale: "en" },
 };
 state.ui.systemLocale = state.ui.locale = navigator.language.startsWith("pl") ? "pl" : "en";
@@ -83,6 +86,14 @@ const handlers: Record<string, (a: Args) => unknown> = {
     state.ui.theme = a.theme;
     state.ui.language = a.language;
     state.ui.locale = a.language === "system" ? state.ui.systemLocale : a.language;
+    return state;
+  },
+  set_ports: (a) => {
+    if (a.apache === a.mysql) throw "Apache and MySQL need different ports.";
+    state.ports = { apache: a.apache, mysql: a.mysql };
+    services[0].port = a.apache;
+    services[1].port = a.mysql;
+    state.mainUrl = a.apache === 80 ? "http://localhost/" : `http://localhost:${a.apache}/`;
     return state;
   },
   add_site: (a) => {

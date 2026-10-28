@@ -37,6 +37,9 @@ npm run release -- -KeepFolder    # zostawia też rozpakowany folder obok zipa
 Skrypt sprawdza zgodność wersji, uruchamia TypeScript i testy, buduje exe i składa paczkę. Na końcu
 tworzy zip i plik `.sha256`.
 
+W zipie jest `README.txt` dla odbiorcy, generowany z `app\scripts\README-release.txt`: instalacja,
+SmartScreen, przejście z Laragona, PATH i logi.
+
 **Do paczki nie trafia** nic z Twojego komputera: `www\`, `data\` (bazy MySQL), `config\`, `logs\`,
 `tmp\`, `backup\`, a z `bin\` także wygenerowane `php.ini`, logi Apache itp. Na końcu skrypt przeszukuje
 paczkę pod kątem ścieżek `D:\SERVER`, Twojego folderu użytkownika, Laragona i danych z gita. Jeśli coś
@@ -93,5 +96,12 @@ była wybrana wersja, Stackyard przejdzie na najnowszą. Narzędzie dodane do PA
 | `backup\` | ręczne kopie (np. bazy sprzed aktualizacji MySQL) |
 | `app\` | kod źródłowy |
 
-Porty zmienisz w `config\settings.json` (`"ports": {"apache": 80, "mysql": 3306}`), a potem uruchom
-usługi ponownie.
+Porty zmienisz w zakładce **Ustawienia → Porty**. Działająca usługa sama się zrestartuje na nowym porcie.
+
+**Ustawienia są chronione:** każdy zapis jest atomowy, a poprzednia wersja zostaje jako
+`config\settings.json.bak`. Jeśli ręczna edycja zepsuje plik, Stackyard odłoży go jako
+`settings.json.broken`, przywróci ostatnią dobrą wersję i pokaże o tym komunikat.
+
+**MySQL** zatrzymuje się kontem `stackyard_shutdown`, które ma tylko uprawnienie SHUTDOWN. Hasło jest
+w `config\mysql\shutdown.cnf`. Dzięki temu możesz ustawić hasło roota, a zatrzymywanie dalej będzie
+czyste. Nie usuwaj tego konta.

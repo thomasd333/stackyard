@@ -263,11 +263,79 @@ impl Services {
         cmd.arg(&defaults);
         let log = logs.join("mysql_console.log");
         let mut proc = process::spawn(&mut cmd, &log).map_err(|e| format!("Cannot start MySQL: {e}"))?;
-        // mysqld has no shutdown event on Windows; this works while root has no password (the default).
-        let mut stop = Command::new(mysql.dir.join("bin/mysqladmin.exe"));
-        stop.args(["--user=root", "--host=127.0.0.1", "--connect-timeout=5", &format!("--port={port}"), "shutdown"]);
-        proc.set_stop(Stop::Command(stop));
-        wait_ready(proc, port, Duration::from_secs(60), &[&log, &logs.join("mysql_error.log")]).map(|p| (p, port))
+        // mysqld has no shutdown event on Windows, so stop it with mysqladmin: as our shutdown-only account
+        // (works after root gets a password), then as root without a password (the default).
+        let admin = mysql.dir.join("bin/mysqladmin.exe");
+        let shutdown_as = |first: String| {
+            let mut c = Command::new(&admin);
+            c.arg(first).args(["--host=127.0.0.1", "--connect-timeout=5", &format!("--port={port}"), "shutdown"]);
+            c
+        };
+        let mut stops = vec![shutdown_as("--user=root".into())];
+        if let Ok(cnf) = shutdown_cnf() {
+            stops.insert(0, shutdown_as(format!("--defaults-extra-file={}", cnf.display())));
+        }
+        proc.set_stop(Stop::Commands(stops));
+        let proc = wait_ready(proc, port, Duration::from_secs(60), &[&log, &logs.join("mysql_error.log")])?;
+        ensure_shutdown_account(&mysql.dir, port);
+        Ok((proc, port))
+    }
+}
+
+const SHUTDOWN_USER: &str = "stackyard_shutdown";
+
+/// `config\mysql\shutdown.cnf`: client options for the shutdown-only account, with a random password made
+/// on first use. It lives outside the datadir, so every MySQL version's datadir gets the same account.
+fn shutdown_cnf() -> std::io::Result<PathBuf> {
+    let path = paths::config_dir().join("mysql").join("shutdown.cnf");
+    if !path.is_file() {
+        use std::hash::{BuildHasher, RandomState};
+        // RandomState is seeded from the OS, which is plenty for a local account that can only shut down.
+        let password: String = (0..3).map(|i| format!("{:016x}", RandomState::new().hash_one(i))).collect();
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(&path, format!("[client]\nuser={SHUTDOWN_USER}\npassword={password}\n"))?;
+    }
+    Ok(path)
+}
+
+fn hidden_status(cmd: &mut Command) -> bool {
+    use std::os::windows::process::CommandExt;
+    use std::process::Stdio;
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    cmd.status().is_ok_and(|s| s.success())
+}
+
+/// Makes sure the shutdown-only account exists and matches shutdown.cnf. It can only be created while root
+/// has no password; once it exists, root may get one and stopping stays clean.
+fn ensure_shutdown_account(mysql_dir: &Path, port: u16) {
+    let Ok(cnf) = shutdown_cnf() else { return };
+    let client = mysql_dir.join("bin/mysql.exe");
+    let port = format!("--port={port}");
+    let base = ["--host=127.0.0.1", "--connect-timeout=5", port.as_str(), "--batch"];
+    let mut check = Command::new(&client);
+    check.arg(format!("--defaults-extra-file={}", cnf.display())).args(base).args(["-e", "SELECT 1"]);
+    if hidden_status(&mut check) {
+        return;
+    }
+    let text = std::fs::read_to_string(&cnf).unwrap_or_default();
+    let Some(password) = text.lines().find_map(|l| l.strip_prefix("password=")) else { return };
+    let sql: String = ["localhost", "127.0.0.1"]
+        .iter()
+        .map(|host| {
+            let user = format!("'{SHUTDOWN_USER}'@'{host}'");
+            format!(
+                "CREATE USER IF NOT EXISTS {user} IDENTIFIED BY '{password}'; \
+                 ALTER USER {user} IDENTIFIED BY '{password}'; GRANT SHUTDOWN ON *.* TO {user}; "
+            )
+        })
+        .collect();
+    let mut create = Command::new(&client);
+    create.arg("--user=root").args(base).args(["-e", &sql]);
+    if hidden_status(&mut create) {
+        applog::info(format!("mysql: shutdown account {SHUTDOWN_USER} set up"));
+    } else {
+        applog::warn("mysql: cannot set up the shutdown account (root has a password?); stop falls back to root");
     }
 }
 

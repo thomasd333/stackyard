@@ -59,6 +59,11 @@ pub struct AppState {
     /// Address of the default host (localhost -> www).
     main_url: String,
     ui: UiInfo,
+    ports: settings::Ports,
+    /// Stackyard's own version, shown in the header.
+    version: &'static str,
+    /// Parse error of a settings.json that was set aside and replaced (shown once).
+    settings_recovered: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -188,6 +193,9 @@ fn build_state(cache: &VersionCache) -> CmdResult<AppState> {
             .collect(),
         site_suggestions: sites::suggestions(),
         main_url: sites::url(None, settings.ports.apache),
+        ports: settings::Ports { apache: settings.ports.apache, mysql: settings.ports.mysql },
+        version: env!("CARGO_PKG_VERSION"),
+        settings_recovered: settings::take_recovery(),
         ui: UiInfo {
             locale: i18n::resolve(&settings.ui.language),
             system_locale: i18n::resolve("system"),
@@ -371,6 +379,34 @@ pub fn set_terminal(
     let mut settings = Settings::load();
     settings.terminal = settings::Terminal { shell, windows_terminal, custom: custom.trim().to_string() };
     settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    build_state(&cache)
+}
+
+/// Saves the ports; a running service restarts on its new port.
+#[tauri::command]
+pub fn set_ports(
+    apache: u16,
+    mysql: u16,
+    cache: State<VersionCache>,
+    services: State<Arc<Services>>,
+) -> CmdResult<AppState> {
+    if apache == 0 || mysql == 0 {
+        return Err("Ports must be between 1 and 65535.".into());
+    }
+    if apache == mysql {
+        return Err("Apache and MySQL need different ports.".into());
+    }
+    let mut settings = Settings::load();
+    let old = (settings.ports.apache, settings.ports.mysql);
+    settings.ports = settings::Ports { apache, mysql };
+    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    applog::info(format!("Ports set to Apache {apache}, MySQL {mysql}"));
+    if old.0 != apache {
+        services.restart("apache");
+    }
+    if old.1 != mysql {
+        services.restart("mysql");
+    }
     build_state(&cache)
 }
 

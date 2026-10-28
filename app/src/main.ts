@@ -44,6 +44,10 @@ interface AppState {
   /** Address of the default host (localhost -> www). */
   mainUrl: string;
   ui: UiInfo;
+  ports: { apache: number; mysql: number };
+  version: string;
+  /** Parse error of a settings.json that was set aside and replaced (sent once). */
+  settingsRecovered: string | null;
 }
 
 interface UiInfo {
@@ -166,6 +170,13 @@ const esc = (s: string) =>
 /** A tooltip attribute. */
 const tip = (text: string) => `title="${esc(text)}"`;
 
+/** Takes a new state from the backend; a settings.json it had to set aside is reported once. */
+function adopt(next: AppState) {
+  state = next;
+  applyUi(next.ui);
+  if (next.settingsRecovered) notice = { kind: "error", text: t("settingsRecovered", { error: next.settingsRecovered }) };
+}
+
 /** Runs a backend command, re-rendering with its returned state; `changesPath` shows the restart hint. */
 async function run(cmd: string, args: Record<string, unknown> = {}, changesPath = false) {
   if (busy) return;
@@ -175,7 +186,7 @@ async function run(cmd: string, args: Record<string, unknown> = {}, changesPath 
     if (cmd === "open_location" || cmd === "open_terminal") {
       await invoke(cmd, args);
     } else {
-      state = await invoke<AppState>(cmd, args);
+      adopt(await invoke<AppState>(cmd, args));
       if (changesPath) notice = { kind: "info", text: t("pathChanged") };
     }
     return true;
@@ -259,7 +270,7 @@ function pollJob() {
     try {
       job = await invoke<Job | null>("get_download");
       if (!jobActive(job)) {
-        state = await invoke<AppState>("get_state");
+        adopt(await invoke<AppState>("get_state"));
         updates = await invoke<Updates | null>("get_updates");
       }
     } catch (e) {
@@ -558,6 +569,22 @@ function settingsTab(s: AppState, dis: string): string {
     </section>
 
     <section>
+      <div class="section-head"><h2>${esc(t("ports"))}</h2></div>
+      <form class="form-row" data-form="ports">
+        <label class="field">
+          <span>${esc(t("portApache"))}</span>
+          <input type="number" class="port" name="apache" min="1" max="65535" value="${s.ports.apache}" required ${dis} />
+        </label>
+        <label class="field">
+          <span>${esc(t("portMysql"))}</span>
+          <input type="number" class="port" name="mysql" min="1" max="65535" value="${s.ports.mysql}" required ${dis} />
+        </label>
+        <button type="submit" ${dis}>${esc(t("save"))}</button>
+      </form>
+      <p class="hint">${esc(t("portsHint"))}</p>
+    </section>
+
+    <section>
       <div class="section-head"><h2>${esc(t("folders"))}</h2></div>
       <div class="form-row">${folders}</div>
     </section>`;
@@ -643,7 +670,7 @@ function render() {
 
   app.innerHTML = `
     <header>
-      <h1>${esc(t("appName"))}</h1>
+      <h1>${esc(t("appName"))} <span class="version">${esc(state.version)}</span></h1>
       <button class="link" data-open="root" title="${esc(t("openRoot"))}">
         ${esc(t("root"))}: <code>${esc(state.root)}</code>
       </button>
@@ -760,7 +787,7 @@ async function saveCustom(value: string) {
   clearTimeout(customTimer);
   if (!state || value.trim() === state.terminal.custom) return;
   try {
-    state = await invoke<AppState>("set_terminal", { ...state.terminal, custom: value });
+    adopt(await invoke<AppState>("set_terminal", { ...state.terminal, custom: value }));
   } catch (e) {
     notice = { kind: "error", text: String(e) };
     render();
@@ -776,7 +803,12 @@ async function openTerminal() {
 
 app.addEventListener("submit", (ev) => {
   ev.preventDefault();
-  if ((ev.target as HTMLElement).dataset.form === "site") addSite();
+  const form = ev.target as HTMLFormElement;
+  if (form.dataset.form === "site") addSite();
+  if (form.dataset.form === "ports") {
+    const value = (name: string) => Number((form.elements.namedItem(name) as HTMLInputElement).value);
+    run("set_ports", { apache: value("apache"), mysql: value("mysql") });
+  }
 });
 
 app.addEventListener("input", (ev) => {
@@ -824,7 +856,7 @@ backend.then(() => Promise.all([
   invoke<Updates | null>("get_updates"),
 ]))
   .then(([s, svcs, j, u]) => {
-    state = s;
+    adopt(s);
     services = svcs;
     job = j;
     updates = u;

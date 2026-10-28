@@ -66,6 +66,7 @@ pub fn run() {
             commands::open_location,
             commands::set_terminal,
             commands::set_ui,
+            commands::set_ports,
             commands::open_terminal,
             commands::add_site,
             commands::remove_site,

@@ -107,6 +107,14 @@ export const en = {
   startApacheFirst: "Start Apache to open this address",
   folders: "Folders",
   folderHint: "Open in Explorer: {path}",
+  ports: "Ports",
+  portApache: "Apache (HTTP)",
+  portMysql: "MySQL",
+  save: "Save",
+  portsHint:
+    "Change them when another program (e.g. Laragon, XAMPP, IIS) already uses 80 or 3306. A running service restarts on the new port.",
+  settingsRecovered:
+    "config\\settings.json could not be read ({error}). It was kept as settings.json.broken and the last good settings were restored.",
   quit: "Quit",
   quitHint: "Stop all services and exit",
 };

@@ -71,11 +71,10 @@ $releaseDir = Join-Path $root "release"
 $out = Join-Path $releaseDir $name
 $zip = "$out.zip"
 foreach ($p in $out, $zip) { if (Test-Path $p) { Remove-Item -Recurse -Force $p } }
-New-Item -ItemType Directory -Force "$out\bin", "$out\www", "$out\scripts" | Out-Null
+New-Item -ItemType Directory -Force "$out\bin", "$out\www" | Out-Null
 
 Copy-Item "$app\src-tauri\target\dist\release\stackyard.exe" "$out\Stackyard.exe"
 Copy-Item "$app\src-tauri\templates\index.php" "$out\www\index.php"
-Copy-Item "$root\scripts\stackyard-start.bat" "$out\scripts\"
 
 # Same detection exes as TOOLS in src-tauri/src/tools.rs.
 $tools = [ordered]@{
@@ -150,16 +149,9 @@ Put tools here, one folder per tool, optionally with version subfolders:
     }
 }
 
-@"
-Stackyard $version - portable local dev stack for Windows (x64)
-
-1. Unzip anywhere whose path has only English letters (e.g. D:\Stackyard; spaces are fine).
-2. Run Stackyard.exe. It needs Microsoft Edge WebView2 (built into Windows 11) and, for
-   Apache/PHP/MySQL, the Microsoft Visual C++ 2015-2022 Redistributable (x64).
-3. Put your projects in www\. Settings, logs and MySQL data are created on first start.
-
-Closing the window keeps Stackyard in the system tray; use Quit to exit.
-"@ | Set-Content "$out\README.txt" -Encoding ascii
+# CRLF so Notepad on older Windows shows the lines.
+$readme = (Get-Content "$PSScriptRoot\README-release.txt" -Raw).Replace('{{VERSION}}', $version)
+[IO.File]::WriteAllText("$out\README.txt", ($readme -replace "`r?`n", "`r`n"), [Text.Encoding]::ASCII)
 
 # --- Privacy scan -----------------------------------------------------------------------------------
 Step "Scanning for local paths and names"
@@ -172,9 +164,13 @@ $gitName = git config user.name 2>$null
 $gitEmail = git config user.email 2>$null
 foreach ($x in $gitName, $gitEmail) { if ($x) { $patterns += [regex]::Escape($x) } }
 $textExt = '.ini', '.conf', '.cfg', '.json', '.txt', '.bat', '.cmd', '.ps1', '.sh', '.npmrc', '.pth', '.xml', '.yml', '.yaml', '.env'
-$hits = Get-ChildItem $out -Recurse -File |
+# Our README explains moving from Laragon, so it is only checked for paths and names.
+$readmePath = "$out\README.txt"
+$hits = @(Get-ChildItem $out -Recurse -File |
+    Where-Object { $_.FullName -ne $readmePath } |
     Where-Object { $textExt -contains $_.Extension.ToLower() -or $_.Name -in 'npmrc', '.npmrc', 'gitconfig', '.gitconfig' } |
-    Select-String -Pattern $patterns -List
+    Select-String -Pattern $patterns -List) +
+    @(Select-String -Path $readmePath -Pattern ($patterns | Where-Object { $_ -ne 'laragon' }) -List)
 if ($hits) {
     $hits | ForEach-Object { Write-Host "  $($_.Path.Substring($out.Length + 1)):$($_.LineNumber): $($_.Line.Trim())" -ForegroundColor Red }
     throw "Local paths or names found in the release (listed above). Exclude those files in scripts\release.ps1."
