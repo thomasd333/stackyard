@@ -594,6 +594,7 @@ mod tests {
         let adminer_login = |driver: &str, user: &str| {
             let mut jar = Vec::new();
             let form = request("GET /adminer/ HTTP/1.0\r\nHost: localhost\r\n\r\n".into());
+            assert!(form.contains(r#"value="root""#), "the login form has no prefilled username:\n{form}");
             remember(&mut jar, &form);
             let cookie = header(&jar);
             // The form's CSRF token, e.g. <input type='hidden' name='token' value='141040:945246'>.
@@ -638,11 +639,14 @@ mod tests {
             for (service, driver, user, database) in
                 [("mysql", "server", "root", "information_schema"), ("postgresql", "pgsql", "postgres", "template1")]
             {
-                if adminer_installed && ids.contains(&service) {
-                    let page = adminer_login(driver, user);
-                    let ok = page.contains(database);
-                    println!("Adminer {service}: {}", if ok { "logged in, databases listed" } else { "FAILED" });
-                    assert!(ok, "Adminer could not log in to {service}:\n{}", &page[..page.len().min(3000)]);
+                // An empty Username means the default superuser.
+                for user in [user, ""] {
+                    if adminer_installed && ids.contains(&service) {
+                        let page = adminer_login(driver, user);
+                        let ok = page.contains(database);
+                        println!("Adminer {service} as {user:?}: {}", if ok { "logged in, databases listed" } else { "FAILED" });
+                        assert!(ok, "Adminer could not log in to {service} as {user:?}:\n{}", &page[..page.len().min(3000)]);
+                    }
                 }
             }
         }

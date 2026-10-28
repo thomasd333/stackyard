@@ -619,17 +619,11 @@ function settingsTab(s: AppState, dis: string): string {
 }
 
 function servicesTab(s: AppState, dis: string): string {
-  const apacheRunning = services.some((x) => x.id === "apache" && x.status === "running");
-  const adminer = s.adminerUrl
-    ? `<button data-open="adminer" ${tip(t(apacheRunning ? "adminerHint" : "startApacheFirst"))}
-         ${apacheRunning ? "" : "disabled"}>${esc(t("adminer"))}</button>`
-    : "";
   return `
     <section>
       <div class="section-head">
         <h2>${esc(t("services"))}</h2>
         <div class="actions">
-          ${adminer}
           <button data-action="start_all" ${tip(t("startAllHint"))}>${esc(t("startAll"))}</button>
           <button data-action="stop_all" ${tip(t("stopAllHint"))}>${esc(t("stopAll"))}</button>
         </div>
@@ -643,11 +637,17 @@ function servicesTab(s: AppState, dis: string): string {
 function toolsTab(s: AppState, dis: string): string {
   // Keep the User PATH panel open across re-renders.
   const pathOpen = app.querySelector("details")?.open ? "open" : "";
+  const apacheRunning = services.some((x) => x.id === "apache" && x.status === "running");
+  const adminer = s.adminerUrl
+    ? `<button data-open="adminer" ${tip(t(apacheRunning ? "adminerHint" : "startApacheFirst"))}
+         ${apacheRunning ? "" : "disabled"}>${esc(t("adminer"))}</button>`
+    : "";
   return `
     <section>
       <div class="section-head">
         <h2>${esc(t("tools"))}</h2>
         <div class="actions">
+          ${adminer}
           <button data-action="check_updates" ${checking ? "disabled" : ""} title="${esc(t("checkUpdatesHint"))}">
             ${esc(t(checking ? "checking" : "checkUpdates"))}</button>
           <button data-action="add_all" ${tip(t("addAllHint"))} ${dis}>${esc(t("addAllToPath"))}</button>

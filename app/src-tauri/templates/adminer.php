@@ -9,15 +9,34 @@ function adminer_object() {
             return true;
         }
 
-        // An empty Server field means this Stackyard's own MySQL or PostgreSQL, on its current port.
+        // Prefill Username with the selected system's default superuser (root, postgres); a typed name
+        // stays when the system changes.
+        function loginFormField($name, $heading, $value) {
+            if ($name == "username" && ($_GET["username"] ?? "") == "") {
+                $value = str_replace('value=""', 'value="root"', $value) . Adminer\script(
+                    "(function () { var user = qs('#username'), driver = user.form['auth[driver]'];"
+                    . " var defaults = {server: 'root', pgsql: 'postgres'};"
+                    . " function pick() { if (user.value == '' || user.value == 'root' || user.value == 'postgres')"
+                    . " user.value = defaults[driver.value] || ''; }"
+                    . " driver.addEventListener('change', pick); pick(); })();"
+                );
+            }
+            return $heading . $value . "\n";
+        }
+
+        // An empty Server field means this Stackyard's own MySQL or PostgreSQL, on its current port,
+        // and an empty Username its default superuser.
         function credentials() {
             $server = Adminer\SERVER;
-            if ($server == "" && Adminer\DRIVER == "server") {
-                $server = "127.0.0.1:{{MYSQL_PORT}}";
-            } elseif ($server == "" && Adminer\DRIVER == "pgsql") {
-                $server = "127.0.0.1:{{POSTGRESQL_PORT}}";
+            $username = $_GET["username"];
+            if (Adminer\DRIVER == "server") {
+                $server = $server == "" ? "127.0.0.1:{{MYSQL_PORT}}" : $server;
+                $username = $username == "" ? "root" : $username;
+            } elseif (Adminer\DRIVER == "pgsql") {
+                $server = $server == "" ? "127.0.0.1:{{POSTGRESQL_PORT}}" : $server;
+                $username = $username == "" ? "postgres" : $username;
             }
-            return array($server, $_GET["username"], Adminer\get_password());
+            return array($server, $username, Adminer\get_password());
         }
     }
     return new StackyardAdminer;

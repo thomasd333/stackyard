@@ -31,8 +31,8 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
 - PostgreSQL: user postgres, no password, port 5432, reachable from this computer only. The database
   folder is created on the first start (data\postgresql-18).
 - Adminer: the "Adminer" button in the Services tab (Apache must be running), or
-  http://localhost/adminer/. Leave "Server" empty for Stackyard's own MySQL or PostgreSQL; it also
-  connects to SQL Server. Only this computer can open it.
+  http://localhost/adminer/. Leave "Server" and "Username" empty for Stackyard's own MySQL (root) or
+  PostgreSQL (postgres); it also connects to SQL Server. Only this computer can open it.
 - Tools & PATH tab: switch on PATH for the tools you want in every terminal (php, composer, node,
   git...). Open a new terminal afterwards. "Open terminal" in the Services tab works without that.
 - Closing the window keeps Stackyard and its services running in the tray (icon next to the clock).
