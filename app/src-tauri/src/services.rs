@@ -42,18 +42,6 @@ struct Slot {
     port: Option<u16>,
 }
 
-impl Status {
-    pub fn label(self) -> &'static str {
-        match self {
-            Status::Stopped => "Stopped",
-            Status::Starting => "Starting…",
-            Status::Running => "Running",
-            Status::Stopping => "Stopping…",
-            Status::Error => "Error",
-        }
-    }
-}
-
 #[derive(Serialize, PartialEq)]
 pub struct ServiceInfo {
     pub id: &'static str,
@@ -210,7 +198,7 @@ impl Services {
     fn launch_apache(&self, settings: &Settings, port: u16) -> StartResult {
         let apache = selected("apache", settings).ok_or("Apache is not installed (bin\\apache).")?;
         let php = selected("php", settings);
-        let conf = confgen::write_apache(&apache.dir, php.as_ref().map(|p| p.dir.as_path()), port)?;
+        let conf = confgen::write_apache(&apache.dir, php.as_ref().map(|p| p.dir.as_path()), port, &settings.sites)?;
         let httpd = apache.dir.join("bin/httpd.exe");
         let extra_path: Vec<PathBuf> = php.iter().map(|p| p.dir.clone()).chain([apache.dir.join("bin")]).collect();
         applog::info(format!(
@@ -414,13 +402,28 @@ mod tests {
 
         // Fetch the start page through Apache + PHP.
         use std::io::{Read, Write};
-        let mut conn = std::net::TcpStream::connect(("127.0.0.1", Settings::load().ports.apache)).unwrap();
-        conn.write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n").unwrap();
-        let mut page = String::new();
-        conn.read_to_string(&mut page).unwrap();
-        println!("HTTP: {}", page.lines().next().unwrap_or_default());
-        println!("Page: {}", page.lines().find(|l| l.contains("PHP ")).unwrap_or_default().trim());
-        assert!(page.contains("Stackyard is running"), "unexpected page:\n{page}");
+        let settings = Settings::load();
+        let get = |host: &str| {
+            let mut conn = std::net::TcpStream::connect(("127.0.0.1", settings.ports.apache)).unwrap();
+            conn.write_all(format!("GET / HTTP/1.0\r\nHost: {host}\r\n\r\n").as_bytes()).unwrap();
+            let mut page = String::new();
+            conn.read_to_string(&mut page).unwrap();
+            page
+        };
+        if ids.contains(&"apache") {
+            let page = get("localhost");
+            println!("HTTP: {}", page.lines().next().unwrap_or_default());
+            println!("Page: {}", page.lines().find(|l| l.contains("PHP ")).unwrap_or_default().trim());
+            assert!(page.contains("Stackyard is running"), "unexpected page:\n{page}");
+
+            // Virtual hosts: print what each one serves (the body's last line).
+            for site in &settings.sites {
+                let page = get(&format!("{}.{}", site.name, crate::sites::TLD));
+                let body = page.split("\r\n\r\n").nth(1).unwrap_or_default().trim();
+                println!("{}: {} | {}", site.name, page.lines().next().unwrap_or_default(), body.lines().last().unwrap_or_default());
+                assert!(!body.contains("Stackyard is running"), "{} served the www start page", site.name);
+            }
+        }
 
         let started = Instant::now();
         for id in &ids {

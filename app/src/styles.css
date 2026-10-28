@@ -12,6 +12,16 @@
   --err: #b42318;
   --err-bg: #fdecea;
   --run: #1a7f37;
+  /* Buttons: in light mode plain surface and a solid accent; dark mode tones both down. */
+  --btn-bg: var(--surface);
+  --btn-border: var(--border);
+  --btn-text: var(--text);
+  --btn-hover-bg: var(--surface);
+  --btn-hover-border: var(--accent);
+  --primary-bg: var(--accent);
+  --primary-border: var(--accent);
+  --primary-text: var(--accent-text);
+  --primary-hover-bg: var(--accent);
 
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
@@ -20,8 +30,9 @@
   color-scheme: light dark;
 }
 
+/* Dark: follows Windows unless a theme is chosen in Settings (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #17191d;
     --surface: #202328;
     --border: #2f333a;
@@ -34,7 +45,45 @@
     --err: #ff8a80;
     --err-bg: #3d1f1d;
     --run: #3fb950;
+    --btn-bg: #24282e;
+    --btn-border: #33373f;
+    --btn-text: #d4d8de;
+    --btn-hover-bg: #2b3037;
+    --btn-hover-border: #3d424b;
+    --primary-bg: rgba(91, 143, 240, 0.16);
+    --primary-border: rgba(91, 143, 240, 0.38);
+    --primary-text: #a9c4f8;
+    --primary-hover-bg: rgba(91, 143, 240, 0.24);
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #17191d;
+  --surface: #202328;
+  --border: #2f333a;
+  --text: #e6e8eb;
+  --muted: #9099a6;
+  --accent: #5b8ff0;
+  --ok-bg: #1f2c44;
+  --warn: #f0a050;
+  --warn-bg: #3a2a18;
+  --err: #ff8a80;
+  --err-bg: #3d1f1d;
+  --run: #3fb950;
+  --btn-bg: #24282e;
+  --btn-border: #33373f;
+  --btn-text: #d4d8de;
+  --btn-hover-bg: #2b3037;
+  --btn-hover-border: #3d424b;
+  --primary-bg: rgba(91, 143, 240, 0.16);
+  --primary-border: rgba(91, 143, 240, 0.38);
+  --primary-text: #a9c4f8;
+  --primary-hover-bg: rgba(91, 143, 240, 0.24);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {
@@ -90,14 +139,18 @@ button {
   font: inherit;
   padding: 6px 12px;
   border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-text);
   cursor: pointer;
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--btn-hover-border);
+}
+
+button:not(.link, .tab):hover:not(:disabled) {
+  background: var(--btn-hover-bg);
 }
 
 button:disabled,
@@ -365,9 +418,11 @@ summary {
 }
 
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
+  background: var(--primary-bg);
+  border-color: var(--primary-border);
+  color: var(--primary-text);
+  --btn-hover-bg: var(--primary-hover-bg);
+  --btn-hover-border: var(--primary-border);
 }
 
 .dot {
@@ -431,6 +486,107 @@ button.primary {
 
 .actions button.link {
   padding: 4px 6px;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.tabs .tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  padding: 8px 14px;
+  margin-bottom: -1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tabs .tab:hover {
+  color: var(--text);
+}
+
+.tabs .tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.flag {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+/* Sites */
+.empty {
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 0;
+}
+
+.tools + .empty {
+  margin-top: 8px;
+}
+
+/* Terminal: the open button sits on the right like a service's start button. */
+.tool.terminal button.primary {
+  margin-left: auto;
+}
+
+.tool.terminal .wide {
+  flex-basis: 100%;
+}
+
+.site-form,
+.form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field.grow {
+  flex: 1;
+  min-width: 240px;
+}
+
+.field input {
+  font-size: 14px;
+}
+
+.host-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.host-input input {
+  width: 160px;
+}
+
+.suffix {
+  color: var(--muted);
+  font-size: 14px;
 }
 
 /* Download line under a tool */

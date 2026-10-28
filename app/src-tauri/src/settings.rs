@@ -13,6 +13,11 @@ pub struct Settings {
     pub ports: Ports,
     #[serde(default)]
     pub terminal: Terminal,
+    #[serde(default)]
+    pub ui: Ui,
+    /// Virtual hosts, in the order they were added.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sites: Vec<Site>,
     /// Folder Stackyard last ran from; a different current folder means it was moved or copied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
@@ -49,6 +54,33 @@ impl Default for Terminal {
     fn default() -> Self {
         Self { shell: "cmd".into(), windows_terminal: true, custom: String::new() }
     }
+}
+
+/// Appearance. Plain strings like `Terminal::shell`; unknown values mean "system".
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ui {
+    /// One of `i18n::THEMES`.
+    pub theme: String,
+    /// One of `i18n::LANGUAGES`, or "system".
+    pub language: String,
+}
+
+impl Default for Ui {
+    fn default() -> Self {
+        Self { theme: "system".into(), language: "system".into() }
+    }
+}
+
+/// A `<name>.localhost` virtual host (see `sites.rs`). Fields default so a hand-edited entry missing
+/// one can't make the whole file fall back to defaults.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Site {
+    /// Host name without the `.localhost` suffix.
+    pub name: String,
+    /// DocumentRoot, relative to the Stackyard folder when inside it.
+    pub root: String,
 }
 
 #[derive(Default, Serialize, Deserialize)]

@@ -81,10 +81,12 @@ pub fn open(cfg: &Terminal, tools: &[ToolDirs], git_dir: Option<&Path>) -> Resul
             let script = paths::fwd(&script);
             let mintty = git.join(r"usr\bin\mintty.exe");
             if wt.is_none() && mintty.is_file() {
-                // Git Bash's own window; MSYSTEM makes /etc/profile add mingw64\bin like git-bash.exe does.
+                // Git Bash's own window; MSYSTEM makes /etc/profile add ucrt64\bin (newer PortableGit)
+                // or mingw64\bin (older) like git-bash.exe does.
+                let msystem = if git.join("ucrt64").is_dir() { "UCRT64" } else { "MINGW64" };
                 let mut c = Command::new(&mintty);
                 c.args(["-t", "Stackyard", "/usr/bin/bash", "--rcfile", &script, "-i"]);
-                c.env("MSYSTEM", "MINGW64").current_dir(&www);
+                c.env("MSYSTEM", msystem).current_dir(&www);
                 c
             } else {
                 // bin\bash.exe sets MSYSTEM and the MSYS PATH itself.

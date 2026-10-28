@@ -11,9 +11,11 @@ use crate::applog;
 use crate::confgen;
 use crate::downloads::{Downloads, Job, Updates};
 use crate::env_path::{self, UserPath};
+use crate::i18n;
 use crate::paths;
 use crate::services::{self, ServiceInfo, Services};
 use crate::settings::{self, Settings};
+use crate::sites;
 use crate::terminal;
 use crate::tools::{self, Install, ToolDef};
 
@@ -51,6 +53,32 @@ pub struct AppState {
     tools: Vec<ToolInfo>,
     user_path: Vec<PathEntry>,
     terminal: TerminalInfo,
+    sites: Vec<SiteInfo>,
+    /// Folders offered when adding a site (see `sites::suggestions`).
+    site_suggestions: Vec<String>,
+    /// Address of the default host (localhost -> www).
+    main_url: String,
+    ui: UiInfo,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiInfo {
+    theme: String,
+    language: String,
+    /// The locale to show: `language`, or the one "system" resolves to.
+    locale: &'static str,
+    /// What "system" resolves to, shown next to that option.
+    system_locale: &'static str,
+}
+
+#[derive(Serialize)]
+pub struct SiteInfo {
+    name: String,
+    host: String,
+    root: String,
+    url: String,
+    exists: bool,
 }
 
 #[derive(Serialize)]
@@ -147,6 +175,25 @@ fn build_state(cache: &VersionCache) -> CmdResult<AppState> {
             .map(|e| PathEntry { value: e.clone(), ours: env_path::is_under(e, &bin), exists: env_path::exists(e) })
             .collect(),
         terminal,
+        sites: settings
+            .sites
+            .iter()
+            .map(|s| SiteInfo {
+                host: format!("{}.{}", s.name, sites::TLD),
+                url: sites::url(Some(&s.name), settings.ports.apache),
+                exists: sites::resolve_root(&s.root).is_dir(),
+                name: s.name.clone(),
+                root: s.root.clone(),
+            })
+            .collect(),
+        site_suggestions: sites::suggestions(),
+        main_url: sites::url(None, settings.ports.apache),
+        ui: UiInfo {
+            locale: i18n::resolve(&settings.ui.language),
+            system_locale: i18n::resolve("system"),
+            theme: settings.ui.theme.clone(),
+            language: settings.ui.language.clone(),
+        },
     })
 }
 
@@ -293,13 +340,14 @@ pub fn open_location(target: String) -> CmdResult<()> {
         "www" => paths::www_dir().into(),
         "logs" => paths::logs_dir().into(),
         "config" => paths::config_dir().into(),
-        "site" => {
-            let port = Settings::load().ports.apache;
-            (if port == 80 { "http://localhost/".to_string() } else { format!("http://localhost:{port}/") }).into()
-        }
-        _ => return Err(format!("Unknown location: {target}")),
+        "site" => sites::url(None, Settings::load().ports.apache).into(),
+        // "site:<name>" opens a virtual host.
+        _ => match target.strip_prefix("site:") {
+            Some(name) => sites::url(Some(&sites::normalize_name(name)?), Settings::load().ports.apache).into(),
+            None => return Err(format!("Unknown location: {target}")),
+        },
     };
-    if target != "site" {
+    if !target.starts_with("site") {
         confgen::ensure_layout()?;
     }
     std::process::Command::new("explorer.exe")
@@ -322,6 +370,22 @@ pub fn set_terminal(
     }
     let mut settings = Settings::load();
     settings.terminal = settings::Terminal { shell, windows_terminal, custom: custom.trim().to_string() };
+    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    build_state(&cache)
+}
+
+/// Saves the theme and language; the tray picks the language up on its next refresh.
+#[tauri::command]
+pub fn set_ui(app: tauri::AppHandle, theme: String, language: String, cache: State<VersionCache>) -> CmdResult<AppState> {
+    if !i18n::THEMES.contains(&theme.as_str()) {
+        return Err(format!("Unknown theme: {theme}"));
+    }
+    if language != "system" && !i18n::LANGUAGES.contains(&language.as_str()) {
+        return Err(format!("Unknown language: {language}"));
+    }
+    let mut settings = Settings::load();
+    i18n::apply_theme(&app, &theme);
+    settings.ui = settings::Ui { theme, language };
     settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
     build_state(&cache)
 }
@@ -350,6 +414,41 @@ pub fn open_terminal() -> CmdResult<()> {
             Err(e)
         }
     }
+}
+
+/// Adds a `<name>.localhost` site; a running Apache restarts to pick it up.
+#[tauri::command]
+pub fn add_site(
+    name: String,
+    root: String,
+    cache: State<VersionCache>,
+    services: State<Arc<Services>>,
+) -> CmdResult<AppState> {
+    let name = sites::normalize_name(&name)?;
+    let root = sites::normalize_root(&root)?;
+    let mut settings = Settings::load();
+    if settings.sites.iter().any(|s| s.name == name) {
+        return Err(format!("Site {name}.{} already exists.", sites::TLD));
+    }
+    applog::info(format!("Sites: added {name}.{} -> {root}", sites::TLD));
+    settings.sites.push(settings::Site { name, root });
+    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    services.restart("apache");
+    build_state(&cache)
+}
+
+/// Removes a site from the Apache config; its files are left alone.
+#[tauri::command]
+pub fn remove_site(name: String, cache: State<VersionCache>, services: State<Arc<Services>>) -> CmdResult<AppState> {
+    let mut settings = Settings::load();
+    let before = settings.sites.len();
+    settings.sites.retain(|s| s.name != name);
+    if settings.sites.len() != before {
+        applog::info(format!("Sites: removed {name}.{}", sites::TLD));
+        settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+        services.restart("apache");
+    }
+    build_state(&cache)
 }
 
 /// Fetches the versions available for download (network, runs off the main thread).

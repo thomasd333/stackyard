@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { t } from "./i18n";
+import { languageNames, setLocale, t } from "./i18n";
 
 interface ToolInfo {
   id: string;
@@ -25,12 +25,34 @@ interface TerminalInfo {
   bashAvailable: boolean;
 }
 
+interface SiteInfo {
+  name: string;
+  host: string;
+  root: string;
+  url: string;
+  exists: boolean;
+}
+
 interface AppState {
   root: string;
   rootSupported: boolean;
   tools: ToolInfo[];
   userPath: PathEntry[];
   terminal: TerminalInfo;
+  sites: SiteInfo[];
+  siteSuggestions: string[];
+  /** Address of the default host (localhost -> www). */
+  mainUrl: string;
+  ui: UiInfo;
+}
+
+interface UiInfo {
+  theme: string;
+  language: string;
+  /** What `language` resolves to ("system" becomes the Windows display language). */
+  locale: string;
+  /** What "system" resolves to. */
+  systemLocale: string;
 }
 
 interface Offer {
@@ -83,9 +105,66 @@ let checking = false;
 let job: Job | null = null;
 /** Offer picked in each tool's download list, kept across re-renders. */
 const chosenOffer: Record<string, string> = {};
+/** "Add site" form; `rootEdited` stops the folder from following the name once typed by hand. */
+const siteDraft = { name: "", root: "", rootEdited: false };
+
+const TABS = ["services", "tools", "sites", "settings"] as const;
+type Tab = (typeof TABS)[number];
+const tabLabel = { services: "tabServices", tools: "tabTools", sites: "tabSites", settings: "tabSettings" } as const;
+
+/**
+ * Applies the theme and language from settings. They are also kept in localStorage so the next start
+ * paints right before the backend answers; settings.json stays the source of truth.
+ */
+let appliedUi = "";
+
+function applyUi(ui: Pick<UiInfo, "theme" | "locale">) {
+  const key = JSON.stringify({ theme: ui.theme, locale: ui.locale });
+  if (key === appliedUi) return;
+  appliedUi = key;
+  setLocale(ui.locale);
+  const root = document.documentElement;
+  if (ui.theme === "light" || ui.theme === "dark") root.dataset.theme = ui.theme;
+  else delete root.dataset.theme;
+  try {
+    localStorage.setItem("ui", key);
+  } catch {
+    // Only the first paint of the next start is affected.
+  }
+}
+
+try {
+  const saved = JSON.parse(localStorage.getItem("ui") ?? "null");
+  if (saved) applyUi(saved);
+} catch {
+  // Defaults until the state arrives.
+}
+
+/** The last tab is remembered per machine; storage may be unavailable, so it is only a convenience. */
+let tab: Tab = (() => {
+  try {
+    const saved = localStorage.getItem("tab");
+    return TABS.find((x) => x === saved) ?? "services";
+  } catch {
+    return "services";
+  }
+})();
+
+function setTab(next: Tab) {
+  tab = next;
+  try {
+    localStorage.setItem("tab", next);
+  } catch {
+    // Not remembered, that's all.
+  }
+  render();
+}
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+/** A tooltip attribute. */
+const tip = (text: string) => `title="${esc(text)}"`;
 
 /** Runs a backend command, re-rendering with its returned state; `changesPath` shows the restart hint. */
 async function run(cmd: string, args: Record<string, unknown> = {}, changesPath = false) {
@@ -99,8 +178,10 @@ async function run(cmd: string, args: Record<string, unknown> = {}, changesPath 
       state = await invoke<AppState>(cmd, args);
       if (changesPath) notice = { kind: "info", text: t("pathChanged") };
     }
+    return true;
   } catch (e) {
     notice = { kind: "error", text: String(e) };
+    return false;
   } finally {
     busy = false;
     render();
@@ -252,7 +333,7 @@ function downloadLine(tool: ToolInfo): string {
     <div class="tool-extra">
       ${hasUpdate ? `<span class="tag ours">${esc(t("updateAvailable"))}</span>` : `<span class="muted">${esc(t("dlOther"))}</span>`}
       <select data-offer="${tool.id}" class="narrow">${options}</select>
-      <button data-download="${tool.id}" ${jobActive(job) ? "disabled" : ""}>${esc(t("download"))}</button>
+      <button data-download="${tool.id}" ${tip(t("downloadHint"))} ${jobActive(job) ? "disabled" : ""}>${esc(t("download"))}</button>
     </div>`;
 }
 
@@ -309,10 +390,10 @@ function toolRow(tool: ToolInfo): string {
       </div>
       ${
         installed
-          ? `<select data-version="${tool.id}" ${tool.versions.length < 2 || busy ? "disabled" : ""}>${options}</select>`
+          ? `<select data-version="${tool.id}" ${tip(t("versionHint"))} ${tool.versions.length < 2 || busy ? "disabled" : ""}>${options}</select>`
           : `<span class="badge">${esc(t("notInstalled"))}</span>`
       }
-      <label class="switch" title="${esc(t("inPath"))}">
+      <label class="switch" ${tip(t("inPath"))}>
         <input type="checkbox" data-path="${tool.id}" ${tool.inPath ? "checked" : ""} ${!installed || busy ? "disabled" : ""} />
         <span class="slider"></span>
         <span class="switch-label">PATH</span>
@@ -340,35 +421,199 @@ function terminalSection(term: TerminalInfo, dis: string): string {
 
   return `
     <section>
-      <div class="section-head">
-        <h2>${esc(t("terminal"))}</h2>
-        <div class="actions">
-          <select data-terminal="shell" class="narrow" ${dis}>${options}</select>
-          <label class="switch" title="${esc(term.wtAvailable ? "" : t("wtUnavailable"))}">
+      <div class="section-head"><h2>${esc(t("terminal"))}</h2></div>
+      <div class="tools">
+        <div class="tool terminal">
+          <select data-terminal="shell" class="narrow" ${tip(t("shellHint"))} ${dis}>${options}</select>
+          <label class="switch" ${tip(t(term.wtAvailable ? "wtHint" : "wtUnavailable"))}>
             <input type="checkbox" data-terminal="wt" ${term.windowsTerminal && term.wtAvailable ? "checked" : ""}
               ${custom || !term.wtAvailable || busy ? "disabled" : ""} />
             <span class="slider"></span>
             <span class="switch-label">${esc(t("useWindowsTerminal"))}</span>
           </label>
           <button class="primary" data-action="terminal" ${dis}>${esc(t("openTerminal"))}</button>
+          ${
+            custom
+              ? `<input type="text" class="wide" id="terminal-custom" data-terminal="custom" value="${esc(term.custom)}"
+                   placeholder="${esc(t("customPlaceholder"))}" spellcheck="false" ${dis} />`
+              : ""
+          }
         </div>
       </div>
-      ${
-        custom
-          ? `<input type="text" class="wide" data-terminal="custom" value="${esc(term.custom)}"
-               placeholder="${esc(t("customPlaceholder"))}" spellcheck="false" ${dis} />`
-          : ""
-      }
       <p class="hint">${esc(t(custom ? "customHint" : "terminalHint"))}</p>
     </section>`;
 }
 
 function pathRow(entry: PathEntry): string {
   const tags = [
-    entry.ours ? `<span class="tag ours">${esc(t("tagOurs"))}</span>` : "",
-    entry.exists ? "" : `<span class="tag warn">${esc(t("tagMissing"))}</span>`,
+    entry.ours ? `<span class="tag ours" ${tip(t("tagOursHint"))}>${esc(t("tagOurs"))}</span>` : "",
+    entry.exists ? "" : `<span class="tag warn" ${tip(t("tagMissingHint"))}>${esc(t("tagMissing"))}</span>`,
   ].join("");
   return `<li class="${entry.ours ? "ours" : ""}"><code>${esc(entry.value)}</code>${tags}</li>`;
+}
+
+/** Link that opens a host in the browser; disabled (with the reason as tooltip) while Apache is stopped. */
+function openLink(target: string, url: string, apacheRunning: boolean): string {
+  return `<button class="link" data-open="${esc(target)}" ${tip(t(apacheRunning ? "openInBrowser" : "startApacheFirst"))}
+    ${apacheRunning ? "" : "disabled"}>${esc(url)}</button>`;
+}
+
+function siteRow(site: SiteInfo, apacheRunning: boolean, dis: string): string {
+  return `
+    <li class="tool">
+      <div class="tool-main">
+        <span class="tool-name">${esc(site.host)}</span>
+        <span class="tool-detail" title="${esc(site.root)}"><code>${esc(site.root)}</code></span>
+      </div>
+      ${site.exists ? "" : `<span class="tag warn">${esc(t("siteMissing"))}</span>`}
+      ${openLink(`site:${site.name}`, site.url, apacheRunning)}
+      <button data-remove-site="${esc(site.name)}" ${tip(t("removeSiteHint"))} ${dis}>${esc(t("remove"))}</button>
+    </li>`;
+}
+
+/** The built-in localhost -> www host, always first and not removable. */
+function mainSiteRow(s: AppState, apacheRunning: boolean): string {
+  return `
+    <li class="tool">
+      <div class="tool-main">
+        <span class="tool-name">localhost <span class="tag" ${tip(t("mainHostHint"))}>${esc(t("mainHost"))}</span></span>
+        <span class="tool-detail"><code>www</code></span>
+      </div>
+      ${openLink("site", s.mainUrl, apacheRunning)}
+    </li>`;
+}
+
+function sitesTab(s: AppState, apacheRunning: boolean, dis: string): string {
+  const options = s.siteSuggestions.map((x) => `<option value="${esc(x)}"></option>`).join("");
+  const list = `
+    <ul class="tools">${mainSiteRow(s, apacheRunning)}${s.sites.map((x) => siteRow(x, apacheRunning, dis)).join("")}</ul>
+    ${s.sites.length ? "" : `<p class="empty">${esc(t("noSites"))}</p>`}`;
+  return `
+    <section>
+      <div class="section-head"><h2>${esc(t("sites"))}</h2></div>
+      ${list}
+    </section>
+
+    <section>
+      <div class="section-head"><h2>${esc(t("addSite"))}</h2></div>
+      <form class="site-form" data-form="site">
+        <label class="field">
+          <span>${esc(t("siteName"))}</span>
+          <span class="host-input">
+            <input type="text" id="site-name" data-site="name" value="${esc(siteDraft.name)}"
+              placeholder="myapp" spellcheck="false" autocomplete="off" ${dis} />
+            <span class="suffix">.localhost</span>
+          </span>
+        </label>
+        <label class="field grow" ${tip(t("siteFolderHint"))}>
+          <span>${esc(t("siteFolder"))}</span>
+          <input type="text" id="site-root" data-site="root" value="${esc(siteDraft.root)}" list="site-folders"
+            placeholder="www\\myapp\\public" spellcheck="false" autocomplete="off" ${dis} />
+          <datalist id="site-folders">${options}</datalist>
+        </label>
+        <button class="primary" type="submit" ${dis}>${esc(t("add"))}</button>
+      </form>
+      <p class="hint">${esc(t("sitesHint"))}</p>
+    </section>`;
+}
+
+const themeLabel = { system: "themeSystem", light: "themeLight", dark: "themeDark" } as const;
+
+function settingsTab(s: AppState, dis: string): string {
+  const option = (value: string, label: string, selected: string) =>
+    `<option value="${value}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
+  const themes = (Object.keys(themeLabel) as (keyof typeof themeLabel)[])
+    .map((id) => option(id, t(themeLabel[id]), s.ui.theme))
+    .join("");
+  const languages = [
+    option("system", t("languageSystem", { language: languageNames[s.ui.systemLocale] ?? "" }), s.ui.language),
+    ...Object.entries(languageNames).map(([id, name]) => option(id, name, s.ui.language)),
+  ].join("");
+  const folders = (
+    [
+      ["root", "Stackyard", ""],
+      ["www", t("openWww"), "\\www"],
+      ["logs", t("openLogs"), "\\logs"],
+      ["config", t("openConfig"), "\\config"],
+    ] as const
+  )
+    .map(
+      ([target, label, sub]) =>
+        `<button data-open="${target}" ${tip(t("folderHint", { path: s.root + sub }))}>${esc(label)}</button>`,
+    )
+    .join("");
+  return `
+    <section>
+      <div class="section-head"><h2>${esc(t("appearance"))}</h2></div>
+      <div class="form-row">
+        <label class="field">
+          <span>${esc(t("theme"))}</span>
+          <select data-ui="theme" class="narrow" ${dis}>${themes}</select>
+        </label>
+        <label class="field">
+          <span>${esc(t("language"))}</span>
+          <select data-ui="language" class="narrow" ${dis}>${languages}</select>
+        </label>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>${esc(t("folders"))}</h2></div>
+      <div class="form-row">${folders}</div>
+    </section>`;
+}
+
+function servicesTab(s: AppState, dis: string): string {
+  return `
+    <section>
+      <div class="section-head">
+        <h2>${esc(t("services"))}</h2>
+        <div class="actions">
+          <button data-action="start_all" ${tip(t("startAllHint"))}>${esc(t("startAll"))}</button>
+          <button data-action="stop_all" ${tip(t("stopAllHint"))}>${esc(t("stopAll"))}</button>
+        </div>
+      </div>
+      <ul class="tools">${services.map(serviceRow).join("")}</ul>
+    </section>
+
+    ${terminalSection(s.terminal, dis)}`;
+}
+
+function toolsTab(s: AppState, dis: string): string {
+  // Keep the User PATH panel open across re-renders.
+  const pathOpen = app.querySelector("details")?.open ? "open" : "";
+  return `
+    <section>
+      <div class="section-head">
+        <h2>${esc(t("tools"))}</h2>
+        <div class="actions">
+          <button data-action="check_updates" ${checking ? "disabled" : ""} title="${esc(t("checkUpdatesHint"))}">
+            ${esc(t(checking ? "checking" : "checkUpdates"))}</button>
+          <button data-action="add_all" ${tip(t("addAllHint"))} ${dis}>${esc(t("addAllToPath"))}</button>
+          <button data-action="remove_all" ${tip(t("removeAllHint"))} ${dis}>${esc(t("removeAllFromPath"))}</button>
+        </div>
+      </div>
+      <ul class="tools">${s.tools.map(toolRow).join("")}</ul>
+    </section>
+
+    <section>
+      <details ${pathOpen}>
+        <summary><h2>${esc(t("userPath"))}</h2> <span class="count">${s.userPath.length}</span></summary>
+        <p class="hint">${esc(t("userPathHint"))}</p>
+        <ul class="path-list">${s.userPath.map(pathRow).join("")}</ul>
+      </details>
+    </section>`;
+}
+
+/** A small marker on a tab that needs attention (a failed service, an available update, a running download). */
+function tabFlag(id: Tab): string {
+  const flagged =
+    id === "services"
+      ? services.some((s) => s.status === "error")
+      : id === "tools"
+        ? jobActive(job) || Object.values(updates?.offers ?? {}).some((o) => o.some((x) => x.updates))
+        : false;
+  return flagged ? `<span class="flag"></span>` : "";
 }
 
 function render() {
@@ -376,10 +621,25 @@ function render() {
     app.innerHTML = `<p class="loading">${esc(notice?.text ?? t("loading"))}</p>`;
     return;
   }
+  applyUi(state.ui);
   const dis = busy ? "disabled" : "";
   const apacheRunning = services.some((s) => s.id === "apache" && s.status === "running");
-  // Keep the User PATH panel open across re-renders.
-  const pathOpen = app.querySelector("details")?.open ? "open" : "";
+  // Re-rendering replaces the inputs; put the cursor back where it was.
+  const focused = document.activeElement as HTMLInputElement | null;
+  const focus = focused?.id ? { id: focused.id, start: focused.selectionStart, end: focused.selectionEnd } : null;
+
+  const tabs = TABS.map(
+    (id) => `<button role="tab" class="tab ${id === tab ? "active" : ""}" aria-selected="${id === tab}"
+      data-tab="${id}">${esc(t(tabLabel[id]))}${tabFlag(id)}</button>`,
+  ).join("");
+  const body =
+    tab === "services"
+      ? servicesTab(state, dis)
+      : tab === "tools"
+        ? toolsTab(state, dis)
+        : tab === "sites"
+          ? sitesTab(state, apacheRunning, dis)
+          : settingsTab(state, dis);
 
   app.innerHTML = `
     <header>
@@ -387,9 +647,11 @@ function render() {
       <button class="link" data-open="root" title="${esc(t("openRoot"))}">
         ${esc(t("root"))}: <code>${esc(state.root)}</code>
       </button>
-      <button data-action="refresh" ${dis}>${esc(t("refresh"))}</button>
+      <button data-action="refresh" ${tip(t("refreshHint"))} ${dis}>${esc(t("refresh"))}</button>
       <button data-action="quit" title="${esc(t("quitHint"))}">${esc(t("quit"))}</button>
     </header>
+
+    <nav class="tabs" role="tablist">${tabs}</nav>
 
     ${state.rootSupported ? "" : `<div class="notice error"><span>${esc(t("rootUnsupported"))}</span></div>`}
 
@@ -400,49 +662,46 @@ function render() {
         : ""
     }
 
-    <section>
-      <div class="section-head">
-        <h2>${esc(t("services"))}</h2>
-        <div class="actions">
-          <button class="link" data-open="site" ${apacheRunning ? "" : "disabled"}>${esc(t("openSite"))}</button>
-          <button class="link" data-open="www">${esc(t("openWww"))}</button>
-          <button class="link" data-open="logs">${esc(t("openLogs"))}</button>
-          <button class="link" data-open="config">${esc(t("openConfig"))}</button>
-          <button data-action="start_all">${esc(t("startAll"))}</button>
-          <button data-action="stop_all">${esc(t("stopAll"))}</button>
-        </div>
-      </div>
-      <ul class="tools">${services.map(serviceRow).join("")}</ul>
-    </section>
+    ${body}`;
 
-    ${terminalSection(state.terminal, dis)}
+  if (focus) {
+    const el = document.getElementById(focus.id) as HTMLInputElement | null;
+    if (el && !el.disabled) {
+      el.focus();
+      if (focus.start !== null) el.setSelectionRange(focus.start, focus.end);
+    }
+  }
+}
 
-    <section>
-      <div class="section-head">
-        <h2>${esc(t("tools"))}</h2>
-        <div class="actions">
-          <button data-action="check_updates" ${checking ? "disabled" : ""} title="${esc(t("checkUpdatesHint"))}">
-            ${esc(t(checking ? "checking" : "checkUpdates"))}</button>
-          <button data-action="add_all" ${dis}>${esc(t("addAllToPath"))}</button>
-          <button data-action="remove_all" ${dis}>${esc(t("removeAllFromPath"))}</button>
-        </div>
-      </div>
-      <ul class="tools">${state.tools.map(toolRow).join("")}</ul>
-    </section>
+/** Adds the site from the form; the form is cleared only when it worked. */
+async function addSite() {
+  if (await run("add_site", { name: siteDraft.name, root: siteDraft.root })) {
+    Object.assign(siteDraft, { name: "", root: "", rootEdited: false });
+    notice = null;
+    render();
+  }
+}
 
-    <section>
-      <details ${pathOpen}>
-        <summary><h2>${esc(t("userPath"))}</h2> <span class="count">${state.userPath.length}</span></summary>
-        <p class="hint">${esc(t("userPathHint"))}</p>
-        <ul class="path-list">${state.userPath.map(pathRow).join("")}</ul>
-      </details>
-    </section>
-
-    <footer class="hint">${esc(t("trayHint"))}</footer>`;
+/** Fills the folder from the name (www\<name>\public, else www\<name>) until it is edited by hand. */
+function followName() {
+  if (siteDraft.rootEdited || !state) return;
+  const name = siteDraft.name.trim().toLowerCase();
+  const match = (x: string) => state!.siteSuggestions.find((s) => s.toLowerCase() === x);
+  siteDraft.root = (name && (match(`www\\${name}\\public`) ?? match(`www\\${name}`))) || "";
+  const input = app.querySelector<HTMLInputElement>("#site-root");
+  if (input) input.value = siteDraft.root;
 }
 
 app.addEventListener("click", (ev) => {
   const target = ev.target as HTMLElement;
+  const tabId = target.closest<HTMLElement>("[data-tab]")?.dataset.tab;
+  if (tabId) {
+    return setTab(tabId as Tab);
+  }
+  const removeSite = target.closest<HTMLElement>("[data-remove-site]")?.dataset.removeSite;
+  if (removeSite) {
+    return run("remove_site", { name: removeSite });
+  }
   const svc = target.closest<HTMLElement>("[data-svc]");
   if (svc) {
     return serviceCmd(svc.dataset.svcAction === "stop" ? "stop_service" : "start_service", { id: svc.dataset.svc });
@@ -515,9 +774,20 @@ async function openTerminal() {
   run("open_terminal");
 }
 
+app.addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  if ((ev.target as HTMLElement).dataset.form === "site") addSite();
+});
+
 app.addEventListener("input", (ev) => {
   const el = ev.target as HTMLInputElement;
-  if (el.dataset.terminal === "custom") {
+  if (el.dataset.site === "name") {
+    siteDraft.name = el.value;
+    followName();
+  } else if (el.dataset.site === "root") {
+    siteDraft.root = el.value;
+    siteDraft.rootEdited = el.value.trim() !== "";
+  } else if (el.dataset.terminal === "custom") {
     clearTimeout(customTimer);
     customTimer = window.setTimeout(() => saveCustom(el.value), 400);
   }
@@ -526,7 +796,10 @@ app.addEventListener("input", (ev) => {
 app.addEventListener("change", (ev) => {
   const el = ev.target as HTMLInputElement | HTMLSelectElement;
   const term = el.dataset.terminal;
-  if (el.dataset.offer) {
+  if (el.dataset.ui && state) {
+    const { theme, language } = state.ui;
+    run("set_ui", el.dataset.ui === "theme" ? { theme: el.value, language } : { theme, language: el.value });
+  } else if (el.dataset.offer) {
     chosenOffer[el.dataset.offer] = el.value;
   } else if (term === "shell") {
     setTerminal({ shell: el.value });
@@ -541,13 +814,15 @@ app.addEventListener("change", (ev) => {
 });
 
 render();
+// `npm run dev` in a plain browser: a fake backend, to preview the UI without building (see mock.ts).
+const backend = import.meta.env.DEV && !("__TAURI_INTERNALS__" in window) ? import("./mock") : Promise.resolve();
 // The download job and the last check survive a window reload (they live in the backend).
-Promise.all([
+backend.then(() => Promise.all([
   invoke<AppState>("get_state"),
   invoke<ServiceInfo[]>("get_services"),
   invoke<Job | null>("get_download"),
   invoke<Updates | null>("get_updates"),
-])
+]))
   .then(([s, svcs, j, u]) => {
     state = s;
     services = svcs;

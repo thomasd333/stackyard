@@ -3,12 +3,14 @@ mod commands;
 mod confgen;
 mod downloads;
 mod env_path;
+mod i18n;
 mod paths;
 mod ports;
 mod process;
 mod relocate;
 mod services;
 mod settings;
+mod sites;
 mod terminal;
 mod tools;
 mod tray;
@@ -39,6 +41,7 @@ pub fn run() {
         .manage(Arc::new(services::Services::default()))
         .manage(Arc::new(downloads::Downloads::default()))
         .setup(|app| {
+            i18n::apply_theme(app.handle(), &settings::Settings::load().ui.theme);
             tray::setup(app.handle())?;
             Ok(())
         })
@@ -62,7 +65,10 @@ pub fn run() {
             commands::stop_all,
             commands::open_location,
             commands::set_terminal,
+            commands::set_ui,
             commands::open_terminal,
+            commands::add_site,
+            commands::remove_site,
             commands::check_updates,
             commands::get_updates,
             commands::download_tool,

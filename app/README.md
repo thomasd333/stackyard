@@ -31,7 +31,8 @@ Requires Rust (rustup), MSVC Build Tools (C++ workload) and Node.
 npm install
 npm run tauri dev      # debug build uses D:\SERVER (two levels up) as the app root
 npm run tauri build    # -> src-tauri\target\release\stackyard.exe
-npm run package        # -> release\Stackyard-<version>-win-x64.zip (add -- -WithBin to include bin\)
+npm run release        # -> ..\release\Stackyard-<version>-win-x64.zip with the selected tool versions
+                       #    (-- -AllVersions, -- -NoBin, -- -KeepFolder); see scripts\release.ps1
 ```
 
 Override the root with the `STACKYARD_ROOT` environment variable.

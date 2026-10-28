@@ -7,6 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::paths::{self, fwd};
+use crate::settings::Site;
+use crate::sites;
 
 const HTTPD_CONF: &str = include_str!("../templates/httpd.conf");
 const PHP_INI: &str = include_str!("../templates/php.ini");
@@ -192,7 +194,7 @@ fn pe_imports(path: &Path) -> Vec<String> {
     fs::read(path).ok().and_then(|data| parse(&data)).unwrap_or_default()
 }
 
-pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, port: u16) -> GenResult<PathBuf> {
+pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, port: u16, sites: &[Site]) -> GenResult<PathBuf> {
     let modules_dir = apache_dir.join("modules");
     let preloads = php_dir.map(|dir| php_preloads(dir, apache_dir)).unwrap_or_default();
     let modules: Vec<String> = preloads
@@ -228,6 +230,7 @@ pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, port: u16) -> Gen
             ("PORT", port.to_string()),
             ("MODULES", modules.join("\n")),
             ("PHP", php),
+            ("SITES", sites::apache_vhosts(sites, port)),
         ],
     );
     let path = paths::config_dir().join("apache/httpd.conf");
