@@ -44,7 +44,9 @@ interface AppState {
   /** Address of the default host (localhost -> www). */
   mainUrl: string;
   ui: UiInfo;
-  ports: { apache: number; mysql: number };
+  ports: { apache: number; mysql: number; postgresql: number };
+  /** Set when Adminer is installed (bin\adminer); it is served by Apache. */
+  adminerUrl: string | null;
   startup: { withWindows: boolean; restoreServices: boolean };
   version: string;
   /** Parse error of a settings.json that was set aside and replaced (sent once). */
@@ -601,6 +603,10 @@ function settingsTab(s: AppState, dis: string): string {
           <span>${esc(t("portMysql"))}</span>
           <input type="number" class="port" name="mysql" min="1" max="65535" value="${s.ports.mysql}" required ${dis} />
         </label>
+        <label class="field">
+          <span>${esc(t("portPostgresql"))}</span>
+          <input type="number" class="port" name="postgresql" min="1" max="65535" value="${s.ports.postgresql}" required ${dis} />
+        </label>
         <button type="submit" ${dis}>${esc(t("save"))}</button>
       </form>
       <p class="hint">${esc(t("portsHint"))}</p>
@@ -613,11 +619,17 @@ function settingsTab(s: AppState, dis: string): string {
 }
 
 function servicesTab(s: AppState, dis: string): string {
+  const apacheRunning = services.some((x) => x.id === "apache" && x.status === "running");
+  const adminer = s.adminerUrl
+    ? `<button data-open="adminer" ${tip(t(apacheRunning ? "adminerHint" : "startApacheFirst"))}
+         ${apacheRunning ? "" : "disabled"}>${esc(t("adminer"))}</button>`
+    : "";
   return `
     <section>
       <div class="section-head">
         <h2>${esc(t("services"))}</h2>
         <div class="actions">
+          ${adminer}
           <button data-action="start_all" ${tip(t("startAllHint"))}>${esc(t("startAll"))}</button>
           <button data-action="stop_all" ${tip(t("stopAllHint"))}>${esc(t("stopAll"))}</button>
         </div>
@@ -829,7 +841,7 @@ app.addEventListener("submit", (ev) => {
   if (form.dataset.form === "site") addSite();
   if (form.dataset.form === "ports") {
     const value = (name: string) => Number((form.elements.namedItem(name) as HTMLInputElement).value);
-    run("set_ports", { apache: value("apache"), mysql: value("mysql") });
+    run("set_ports", { apache: value("apache"), mysql: value("mysql"), postgresql: value("postgresql") });
   }
 });
 

@@ -37,11 +37,12 @@ pub struct Settings {
 pub struct Ports {
     pub apache: u16,
     pub mysql: u16,
+    pub postgresql: u16,
 }
 
 impl Default for Ports {
     fn default() -> Self {
-        Self { apache: 80, mysql: 3306 }
+        Self { apache: 80, mysql: 3306, postgresql: 5432 }
     }
 }
 

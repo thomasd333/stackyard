@@ -77,6 +77,8 @@ narzędzia:
 | Apache | `bin\apache\httpd-2.4.x-…-Win64-VS18\` | `bin\httpd.exe` | apachelounge.com/download. Zip ma w środku folder `Apache24`: wypakuj **jego zawartość** do folderu wersji |
 | PHP | `bin\php\php-8.x.x-Win32-vs17-x64\` | `php.exe` | windows.php.net, wersja **Thread Safe x64** (inną Apache nie uruchomi) |
 | MySQL | `bin\mysql\mysql-8.4.x-winx64\` | `bin\mysqld.exe` | dev.mysql.com, „ZIP Archive”, bez „Debug Binaries”. Po rozpakowaniu można usunąć zbędne ~950 MB: `*.pdb`, `*.lib`, `bin\*-debug.dll`, `include\`, `lib\plugin\debug\`, `lib\mecab\` i `lib\plugin\libpluginmecab.dll` |
+| PostgreSQL | `bin\postgresql\postgresql-18.x\` | `bin\postgres.exe` | enterprisedb.com/download-postgresql-binaries (zip „binaries”, nie instalator). Zip ma w środku folder `pgsql`: wypakuj **jego zawartość**. Zbędne: `pgAdmin 4\`, `StackBuilder\`, `doc\`, `include\`, `lib\*.lib` |
+| Adminer | `bin\adminer\` (bez podfolderu wersji) | `adminer-x.y.z.php` | adminer.org (wersja pełna, nie „MySQL only”). Wrzuć nowy plik i usuń stary; Stackyard bierze najnowszy po restarcie Apache |
 | Node.js | `bin\nodejs\node-v26.x.x-win-x64\` | `node.exe` | nodejs.org, zip dla Windows x64 |
 | Python | `bin\python\python-3.x\` | `python.exe` | |
 | Git | `bin\git\` (bez podfolderu wersji) | `cmd\git.exe` | PortableGit z GitHuba. Wypakuj do pustego folderu: `PortableGit-….7z.exe -o"D:\SERVER\tmp\git-new" -y`, potem podmień nim `bin\git` |
@@ -91,7 +93,10 @@ narzędzia:
 - **MySQL:** baza leży w `data\mysql-<major.minor>\`, np. `data\mysql-8.4`. Nowa wersja z tej samej serii
   (8.4.3 → 8.4.13) używa tej samej bazy i przy pierwszym starcie sama ją aktualizuje. **Przed taką
   zmianą skopiuj `data\mysql-8.4`.** Inna seria (np. 9.x) zaczyna z nową, pustą bazą.
-- **Działająca usługa** (Apache, MySQL) po zmianie wersji sama się restartuje.
+- **PostgreSQL:** baza leży w `data\postgresql-<major>\`, np. `data\postgresql-18`. Poprawki w ramach serii
+  (18.6 → 18.7) używają tej samej bazy. Nowy major (19) zaczyna z pustą bazą; dane przenosi się przez
+  `pg_dump` i import (albo `pg_upgrade`).
+- **Działająca usługa** (Apache, MySQL, PostgreSQL) po zmianie wersji sama się restartuje.
 
 **Usuwanie starej wersji:** zatrzymaj usługę, usuń jej folder z `bin\…` i kliknij **Odśwież**. Jeśli to
 była wybrana wersja, Stackyard przejdzie na najnowszą. Narzędzie dodane do PATH przestaw w programie

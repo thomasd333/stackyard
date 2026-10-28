@@ -119,9 +119,13 @@ export const de: Messages = {
   ports: "Ports",
   portApache: "Apache (HTTP)",
   portMysql: "MySQL",
+  portPostgresql: "PostgreSQL",
+  adminer: "Adminer",
+  adminerHint:
+    "MySQL-, PostgreSQL- und SQL-Server-Datenbanken im Browser verwalten. Das Feld Server leer lassen für die Datenbanken von Stackyard: MySQL-Benutzer root, PostgreSQL-Benutzer postgres, ohne Passwort.",
   save: "Speichern",
   portsHint:
-    "Ändere sie, wenn ein anderes Programm (z. B. Laragon, XAMPP, IIS) bereits 80 oder 3306 belegt. Ein laufender Dienst startet auf dem neuen Port neu.",
+    "Ändere sie, wenn ein anderes Programm (z. B. Laragon, XAMPP, IIS) bereits 80, 3306 oder 5432 belegt. Ein laufender Dienst startet auf dem neuen Port neu.",
   settingsRecovered:
     "config\\settings.json konnte nicht gelesen werden ({error}). Sie wurde als settings.json.broken aufbewahrt und die letzten gültigen Einstellungen wurden wiederhergestellt.",
   quit: "Beenden",

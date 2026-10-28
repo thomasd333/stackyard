@@ -148,7 +148,16 @@ Put tools here, one folder per tool, optionally with version subfolders:
         }
     }
 
-    # Apache, PHP and MySQL need the Visual C++ runtime. App-local copies (which Microsoft allows to
+    # Adminer is a single PHP file, not a tool with an exe; only the newest one goes in.
+    $adminer = Get-ChildItem "$root\bin\adminer\adminer*.php" -ErrorAction SilentlyContinue |
+        Sort-Object { Get-NaturalKey $_.Name } -Descending | Select-Object -First 1
+    if ($adminer) {
+        New-Item -ItemType Directory -Force "$out\bin\adminer" | Out-Null
+        Copy-Item $adminer.FullName "$out\bin\adminer\"
+        Write-Host "  adminer\$($adminer.Name)"
+    }
+
+    # Apache, PHP, MySQL and PostgreSQL need the Visual C++ runtime. App-local copies (which Microsoft allows to
     # redistribute) let the zip run on a PC without the Visual C++ Redistributable. They come from this
     # PC's System32, so keep its redistributable up to date.
     Step "Adding the Visual C++ runtime"
@@ -161,7 +170,7 @@ Put tools here, one folder per tool, optionally with version subfolders:
         if ($v -lt $minimum) { throw "$f is $v, older than $minimum. Update the Visual C++ Redistributable (x64): https://aka.ms/vs/17/release/vc_redist.x64.exe" }
     }
     Write-Host "  version $v"
-    $targets = @(Get-Item "$out\bin\apache\*\bin", "$out\bin\php\*", "$out\bin\mysql\*\bin" -ErrorAction SilentlyContinue)
+    $targets = @(Get-Item "$out\bin\apache\*\bin", "$out\bin\php\*", "$out\bin\mysql\*\bin", "$out\bin\postgresql\*\bin" -ErrorAction SilentlyContinue)
     foreach ($t in $targets) {
         # A copy the tool ships itself is left alone.
         foreach ($f in $runtime) { if (-not (Test-Path "$t\$f")) { Copy-Item "$env:SystemRoot\System32\$f" $t } }

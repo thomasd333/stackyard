@@ -116,9 +116,13 @@ export const pl: Messages = {
   ports: "Porty",
   portApache: "Apache (HTTP)",
   portMysql: "MySQL",
+  portPostgresql: "PostgreSQL",
+  adminer: "Adminer",
+  adminerHint:
+    "Zarządzaj bazami MySQL, PostgreSQL i SQL Server w przeglądarce. Puste pole Serwer oznacza bazy Stackyard: MySQL użytkownik root, PostgreSQL użytkownik postgres, bez hasła.",
   save: "Zapisz",
   portsHint:
-    "Zmień je, gdy inny program (np. Laragon, XAMPP, IIS) zajmuje już port 80 lub 3306. Działająca usługa zrestartuje się na nowym porcie.",
+    "Zmień je, gdy inny program (np. Laragon, XAMPP, IIS) zajmuje już port 80, 3306 lub 5432. Działająca usługa zrestartuje się na nowym porcie.",
   settingsRecovered:
     "Nie udało się odczytać config\\settings.json ({error}). Zachowano go jako settings.json.broken i przywrócono ostatnie poprawne ustawienia.",
   quit: "Zakończ",

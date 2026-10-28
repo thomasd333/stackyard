@@ -20,11 +20,12 @@ const OPEN_PREFIX: &str = "open:";
 type Text = fn(&Tray) -> &'static str;
 
 /// Menu items with fixed text, relabelled when the language changes.
-const FIXED: [(&str, Text); 6] = [
+const FIXED: [(&str, Text); 7] = [
     ("show", |t| t.show),
     ("start_all", |t| t.start_all),
     ("stop_all", |t| t.stop_all),
     ("open:www", |t| t.open_www),
+    ("open:adminer", |t| t.open_adminer),
     ("terminal", |t| t.open_terminal),
     ("quit", |t| t.quit),
 ];
@@ -56,6 +57,9 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     menu.append(&separator()?)?;
     menu.append(&sites)?;
     menu.append(get("open:www"))?;
+    if crate::confgen::adminer_file().is_some() {
+        menu.append(get("open:adminer"))?;
+    }
     menu.append(get("terminal"))?;
     menu.append(&separator()?)?;
     menu.append(get("quit"))?;

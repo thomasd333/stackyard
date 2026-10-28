@@ -115,9 +115,13 @@ export const en = {
   ports: "Ports",
   portApache: "Apache (HTTP)",
   portMysql: "MySQL",
+  portPostgresql: "PostgreSQL",
+  adminer: "Adminer",
+  adminerHint:
+    "Manage MySQL, PostgreSQL and SQL Server databases in the browser. Leave the Server field empty for Stackyard's own databases: MySQL user root, PostgreSQL user postgres, no password.",
   save: "Save",
   portsHint:
-    "Change them when another program (e.g. Laragon, XAMPP, IIS) already uses 80 or 3306. A running service restarts on the new port.",
+    "Change them when another program (e.g. Laragon, XAMPP, IIS) already uses 80, 3306 or 5432. A running service restarts on the new port.",
   settingsRecovered:
     "config\\settings.json could not be read ({error}). It was kept as settings.json.broken and the last good settings were restored.",
   quit: "Quit",

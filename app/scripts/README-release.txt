@@ -1,7 +1,8 @@
 Stackyard {{VERSION}} - portable local dev stack for Windows 10/11 (x64)
 =========================================================================
 
-Apache, PHP, MySQL, Node.js, Composer, Git and Python in one folder, with a small window (and a tray
+Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git, Python and Adminer (a database manager in
+the browser) in one folder, with a small window (and a tray
 icon) to start/stop services, switch versions, manage the PATH and add local sites. Everything,
 settings included, stays inside this folder. The window is in English, German, Spanish, French,
 Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
@@ -15,7 +16,7 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
   letters such as a-ogonek, o-acute or z-dot are not: PHP and MySQL cannot handle them).
 - Run Stackyard.exe. It is not code-signed, so SmartScreen may say "Windows protected your PC":
   click "More info" > "Run anyway".
-- Nothing else to install: the Visual C++ runtime that Apache, PHP and MySQL need is included next
+- Nothing else to install: the Visual C++ runtime that Apache, PHP and the databases need is included next
   to them. The window uses Microsoft Edge WebView2, which is part of Windows 11 (and of an up-to-date
   Windows 10 with Edge).
 
@@ -27,6 +28,11 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
   tab, e.g. "shop" -> www\shop\public, then open http://shop.localhost/.
 - MySQL: user root, no password, port 3306. You may set a root password: Stackyard stops MySQL with
   its own account "stackyard_shutdown" (it can only shut the server down). Do not delete that account.
+- PostgreSQL: user postgres, no password, port 5432, reachable from this computer only. The database
+  folder is created on the first start (data\postgresql-18).
+- Adminer: the "Adminer" button in the Services tab (Apache must be running), or
+  http://localhost/adminer/. Leave "Server" empty for Stackyard's own MySQL or PostgreSQL; it also
+  connects to SQL Server. Only this computer can open it.
 - Tools & PATH tab: switch on PATH for the tools you want in every terminal (php, composer, node,
   git...). Open a new terminal afterwards. "Open terminal" in the Services tab works without that.
 - Closing the window keeps Stackyard and its services running in the tray (icon next to the clock).

@@ -119,9 +119,13 @@ export const es: Messages = {
   ports: "Puertos",
   portApache: "Apache (HTTP)",
   portMysql: "MySQL",
+  portPostgresql: "PostgreSQL",
+  adminer: "Adminer",
+  adminerHint:
+    "Gestiona bases de datos MySQL, PostgreSQL y SQL Server en el navegador. Deja vacío el campo Servidor para las bases de Stackyard: usuario de MySQL root, de PostgreSQL postgres, sin contraseña.",
   save: "Guardar",
   portsHint:
-    "Cámbialos si otro programa (p. ej. Laragon, XAMPP, IIS) ya usa el 80 o el 3306. Un servicio en ejecución se reinicia en el nuevo puerto.",
+    "Cámbialos si otro programa (p. ej. Laragon, XAMPP, IIS) ya usa el 80, el 3306 o el 5432. Un servicio en ejecución se reinicia en el nuevo puerto.",
   settingsRecovered:
     "No se pudo leer config\\settings.json ({error}). Se conservó como settings.json.broken y se restauró la última configuración válida.",
   quit: "Salir",

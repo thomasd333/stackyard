@@ -13,7 +13,7 @@ const state = {
     tool("apache", "Apache", ["httpd-2.4.68-260617-Win64-VS18"], "Apache/2.4.68 (Win64)", true),
     tool("php", "PHP", ["php-8.5.12-1-Win32-vs17-x64", "php-8.3.36-1-Win32-vs16-x64"], "PHP 8.5.12 (cli)", true),
     tool("mysql", "MySQL", ["mysql-8.4.3-winx64"], "mysqld Ver 8.4.3", true),
-    tool("postgresql", "PostgreSQL", [], null, false),
+    tool("postgresql", "PostgreSQL", ["postgresql-18.6"], "postgres (PostgreSQL) 18.6", false),
     tool("nodejs", "Node.js", ["node-v26.12.1-win-x64", "node-v22"], "v26.12.1", true),
     tool("composer", "Composer", ["default"], "Composer 2.9.1", true),
     tool("git", "Git", ["default"], "git version 2.51.0.windows.1", false),
@@ -29,9 +29,10 @@ const state = {
   sites: [] as { name: string; host: string; root: string; url: string; exists: boolean }[],
   siteSuggestions: ["www\\shop\\public", "www\\shop", "www\\blog"],
   mainUrl: "http://localhost/",
-  ports: { apache: 80, mysql: 3306 },
+  ports: { apache: 80, mysql: 3306, postgresql: 5432 },
+  adminerUrl: "http://localhost/adminer/" as string | null,
   startup: { withWindows: false, restoreServices: true },
-  version: "0.7.1",
+  version: "1.0.0",
   settingsRecovered: null as string | null,
   ui: { theme: "system", language: "system", locale: "en", systemLocale: "en" },
 };
@@ -44,6 +45,7 @@ function tool(id: string, name: string, versions: string[], versionText: string 
 const services = [
   { id: "apache", name: "Apache", status: "running", message: null, port: 80, pid: 12345, version: "2.4.68" },
   { id: "mysql", name: "MySQL", status: "stopped", message: null, port: 3306, pid: null, version: "8.4.3" },
+  { id: "postgresql", name: "PostgreSQL", status: "stopped", message: null, port: 5432, pid: null, version: "postgresql-18.6" },
 ] as { id: string; name: string; status: string; message: string | null; port: number; pid: number | null; version: string | null }[];
 
 /** Moves a service through starting/stopping like the real one, so polling and the dots can be seen. */
@@ -95,7 +97,8 @@ const handlers: Record<string, (a: Args) => unknown> = {
   },
   set_ports: (a) => {
     if (a.apache === a.mysql) throw "Apache and MySQL need different ports.";
-    state.ports = { apache: a.apache, mysql: a.mysql };
+    state.ports = { apache: a.apache, mysql: a.mysql, postgresql: a.postgresql };
+    services[2].port = a.postgresql;
     services[0].port = a.apache;
     services[1].port = a.mysql;
     state.mainUrl = a.apache === 80 ? "http://localhost/" : `http://localhost:${a.apache}/`;

@@ -61,6 +61,8 @@ pub struct AppState {
     main_url: String,
     ui: UiInfo,
     ports: settings::Ports,
+    /// Where Adminer is served when it is installed (bin\adminer); it needs Apache running.
+    adminer_url: Option<String>,
     startup: StartupInfo,
     /// Stackyard's own version, shown in the header.
     version: &'static str,
@@ -202,7 +204,12 @@ fn build_state(cache: &VersionCache) -> CmdResult<AppState> {
             .collect(),
         site_suggestions: sites::suggestions(),
         main_url: sites::url(None, settings.ports.apache),
-        ports: settings::Ports { apache: settings.ports.apache, mysql: settings.ports.mysql },
+        ports: settings::Ports {
+            apache: settings.ports.apache,
+            mysql: settings.ports.mysql,
+            postgresql: settings.ports.postgresql,
+        },
+        adminer_url: confgen::adminer_file().map(|_| adminer_url(settings.ports.apache)),
         startup: StartupInfo {
             with_windows: settings.startup.with_windows,
             restore_services: settings.startup.restore_services,
@@ -362,13 +369,14 @@ pub fn open_location(target: String) -> CmdResult<()> {
         "logs" => paths::logs_dir().into(),
         "config" => paths::config_dir().into(),
         "site" => sites::url(None, Settings::load().ports.apache).into(),
+        "adminer" => adminer_url(Settings::load().ports.apache).into(),
         // "site:<name>" opens a virtual host.
         _ => match target.strip_prefix("site:") {
             Some(name) => sites::url(Some(&sites::normalize_name(name)?), Settings::load().ports.apache).into(),
             None => return Err(format!("Unknown location: {target}")),
         },
     };
-    if !target.starts_with("site") {
+    if !target.starts_with("site") && target != "adminer" {
         confgen::ensure_layout()?;
     }
     std::process::Command::new("explorer.exe")
@@ -411,27 +419,36 @@ pub fn set_startup(with_windows: bool, restore_services: bool, cache: State<Vers
 pub fn set_ports(
     apache: u16,
     mysql: u16,
+    postgresql: u16,
     cache: State<VersionCache>,
     services: State<Arc<Services>>,
 ) -> CmdResult<AppState> {
-    if apache == 0 || mysql == 0 {
+    if apache == 0 || mysql == 0 || postgresql == 0 {
         return Err("Ports must be between 1 and 65535.".into());
     }
-    if apache == mysql {
-        return Err("Apache and MySQL need different ports.".into());
+    if apache == mysql || apache == postgresql || mysql == postgresql {
+        return Err("Apache, MySQL and PostgreSQL need different ports.".into());
     }
     let mut settings = Settings::load();
-    let old = (settings.ports.apache, settings.ports.mysql);
-    settings.ports = settings::Ports { apache, mysql };
+    let old = settings::Ports { ..settings.ports };
+    settings.ports = settings::Ports { apache, mysql, postgresql };
     settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
-    applog::info(format!("Ports set to Apache {apache}, MySQL {mysql}"));
-    if old.0 != apache {
+    applog::info(format!("Ports set to Apache {apache}, MySQL {mysql}, PostgreSQL {postgresql}"));
+    // Apache also restarts for a database port: Adminer's defaults are written when it starts.
+    if (old.apache, old.mysql, old.postgresql) != (apache, mysql, postgresql) {
         services.restart("apache");
     }
-    if old.1 != mysql {
+    if old.mysql != mysql {
         services.restart("mysql");
     }
+    if old.postgresql != postgresql {
+        services.restart("postgresql");
+    }
     build_state(&cache)
+}
+
+fn adminer_url(apache_port: u16) -> String {
+    format!("{}adminer/", sites::url(None, apache_port))
 }
 
 /// Saves the theme and language; the tray picks the language up on its next refresh.

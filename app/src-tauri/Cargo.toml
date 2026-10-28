@@ -1,6 +1,6 @@
 [package]
 name = "stackyard"
-version = "0.7.1"
+version = "1.0.0"
 description = "Portable local dev stack for Windows"
 authors = ["you"]
 edition = "2024"

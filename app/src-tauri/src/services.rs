@@ -1,4 +1,4 @@
-//! Starting, stopping and supervising Apache and MySQL.
+//! Starting, stopping and supervising Apache, MySQL and PostgreSQL.
 //!
 //! Start/stop work runs on background threads; the UI polls `snapshot()` for status.
 
@@ -15,10 +15,10 @@ use crate::confgen;
 use crate::paths;
 use crate::ports;
 use crate::process::{self, Proc, Stop};
-use crate::settings::Settings;
+use crate::settings::{self, Settings};
 use crate::tools::{self, Install};
 
-pub const SERVICES: &[(&str, &str)] = &[("apache", "Apache"), ("mysql", "MySQL")];
+pub const SERVICES: &[(&str, &str)] = &[("apache", "Apache"), ("mysql", "MySQL"), ("postgresql", "PostgreSQL")];
 
 /// Windows STATUS_DLL_NOT_FOUND, typically a missing Visual C++ Redistributable.
 const DLL_NOT_FOUND: i32 = 0xC000_0135_u32 as i32;
@@ -82,6 +82,10 @@ impl Services {
     }
 
     pub fn start(self: &Arc<Self>, id: &'static str) {
+        // "Start all" and restoring skip what isn't installed (the buttons for it are disabled anyway).
+        if selected(id, &Settings::load()).is_none() {
+            return;
+        }
         {
             let mut slots = self.slots.lock().unwrap();
             let slot = slots.entry(id).or_default();
@@ -193,6 +197,7 @@ impl Services {
         match id {
             "apache" => self.launch_apache(&settings, port),
             "mysql" => self.launch_mysql(&settings, port),
+            "postgresql" => self.launch_postgresql(&settings, port),
             _ => Err(format!("Unknown service: {id}")),
         }
     }
@@ -200,7 +205,9 @@ impl Services {
     fn launch_apache(&self, settings: &Settings, port: u16) -> StartResult {
         let apache = selected("apache", settings).ok_or("Apache is not installed (bin\\apache).")?;
         let php = selected("php", settings);
-        let conf = confgen::write_apache(&apache.dir, php.as_ref().map(|p| p.dir.as_path()), port, &settings.sites)?;
+        // Apache's port comes from the caller (checked free); the others are only for Adminer's defaults.
+        let ports = settings::Ports { apache: port, ..settings.ports };
+        let conf = confgen::write_apache(&apache.dir, php.as_ref().map(|p| p.dir.as_path()), &ports, &settings.sites)?;
         let httpd = apache.dir.join("bin/httpd.exe");
         let extra_path: Vec<PathBuf> = php.iter().map(|p| p.dir.clone()).chain([apache.dir.join("bin")]).collect();
         applog::info(format!(
@@ -284,6 +291,58 @@ impl Services {
     }
 }
 
+impl Services {
+    fn launch_postgresql(&self, settings: &Settings, port: u16) -> StartResult {
+        let pg = selected("postgresql", settings).ok_or("PostgreSQL is not installed (bin\\postgresql).")?;
+        let major = major_version(&pg.label);
+        // One data directory per major version: a new major can't read an older one without pg_upgrade.
+        let datadir = paths::data_dir().join(major.map_or_else(|| pg.label.clone(), |m| format!("postgresql-{m}")));
+        let bin = pg.dir.join("bin");
+        let logs = paths::logs_dir();
+        applog::info(format!("postgresql: {} on port {port}, datadir {}", pg.label, datadir.display()));
+
+        if !datadir.join("PG_VERSION").exists() {
+            applog::info("postgresql: initializing a new data directory");
+            self.set_message("postgresql", "Initializing data directory (first start)…");
+            let log = logs.join("postgresql_init.log");
+            let mut cmd = Command::new(bin.join("initdb.exe"));
+            // Superuser "postgres" without a password, trusted from this computer only (initdb's
+            // pg_hba.conf with -A trust lists only 127.0.0.1 and ::1). UTF-8 and no Windows code page
+            // locale, so the cluster behaves the same on every machine.
+            cmd.arg("-D").arg(&datadir).args(["-U", "postgres", "-A", "trust", "-E", "UTF8", "--locale=C"]);
+            if major.is_some_and(|m| m >= 17) {
+                // Unicode-aware upper()/lower() and ILIKE, still independent of the OS.
+                cmd.args(["--locale-provider=builtin", "--builtin-locale=C.UTF-8"]);
+            }
+            let mut proc = process::spawn(&mut cmd, &log).map_err(|e| format!("Cannot run initdb: {e}"))?;
+            if !proc.wait_for_exit(Duration::from_secs(180)) {
+                proc.kill();
+                return Err("PostgreSQL initialization timed out.".into());
+            }
+            let code = proc.exited().flatten();
+            if code != Some(0) {
+                return Err(explain_exit(code, &format!("PostgreSQL initialization failed.\n{}", tail(&[&log], 6))));
+            }
+            self.set_message("postgresql", "Starting…");
+        }
+
+        let log = logs.join("postgresql.log");
+        let mut cmd = Command::new(bin.join("postgres.exe"));
+        cmd.arg("-D").arg(&datadir).args(["-p", &port.to_string(), "-c", "listen_addresses=localhost"]);
+        let mut proc = process::spawn(&mut cmd, &log).map_err(|e| format!("Cannot start PostgreSQL: {e}"))?;
+        // "fast": roll back open transactions and stop, which is what a dev server wants.
+        let mut stop = Command::new(bin.join("pg_ctl.exe"));
+        stop.arg("stop").arg("-D").arg(&datadir).args(["-m", "fast", "-w", "-t", "30"]);
+        proc.set_stop(Stop::Commands(vec![stop]));
+        wait_ready(proc, port, Duration::from_secs(60), &[&log]).map(|p| (p, port))
+    }
+}
+
+/// The major version from an install folder name, e.g. 18 for `postgresql-18.6`.
+fn major_version(label: &str) -> Option<u32> {
+    label.split(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty())?.parse().ok()
+}
+
 const SHUTDOWN_USER: &str = "stackyard_shutdown";
 
 /// `config\mysql\shutdown.cnf`: client options for the shutdown-only account, with a random password made
@@ -364,6 +423,7 @@ fn remember(id: &str, running: bool) {
 fn configured_port(id: &str, settings: &Settings) -> u16 {
     match id {
         "mysql" => settings.ports.mysql,
+        "postgresql" => settings.ports.postgresql,
         _ => settings.ports.apache,
     }
 }
@@ -383,7 +443,11 @@ fn reap(id: &str, slot: &mut Slot) {
     slot.proc = None;
     slot.status = Status::Error;
     let logs = paths::logs_dir();
-    let log = logs.join(format!("{}_error.log", if id == "mysql" { "mysql" } else { "apache" }));
+    let log = logs.join(match id {
+        "mysql" => "mysql_error.log",
+        "postgresql" => "postgresql.log",
+        _ => "apache_error.log",
+    });
     let message = explain_exit(code, &format!("Process exited unexpectedly.\n{}", tail(&[&log], 4)));
     applog::error(format!("{id}: exited unexpectedly (code {code:?}): {message}"));
     slot.message = Some(message);
@@ -467,6 +531,13 @@ mod tests {
     }
 
     /// Starts and stops the real services from `bin/`: `cargo test start_stop_real -- --ignored --nocapture`.
+    #[test]
+    fn postgresql_major_version() {
+        assert_eq!(major_version("postgresql-18.6"), Some(18));
+        assert_eq!(major_version("17.11"), Some(17));
+        assert_eq!(major_version("default"), None);
+    }
+
     /// Set `STACKYARD_TEST_SERVICES=apache` to test only Apache (e.g. while another MySQL uses the datadir).
     #[test]
     #[ignore]
@@ -475,9 +546,14 @@ mod tests {
             use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SetErrorMode};
             SetErrorMode(SEM_FAILCRITICALERRORS);
         }
-        let wanted = std::env::var("STACKYARD_TEST_SERVICES").unwrap_or_else(|_| "apache,mysql".into());
-        let ids: Vec<&'static str> =
-            SERVICES.iter().map(|(id, _)| *id).filter(|id| wanted.split(',').any(|w| w == *id)).collect();
+        let wanted = std::env::var("STACKYARD_TEST_SERVICES").unwrap_or_else(|_| "apache,mysql,postgresql".into());
+        let settings = Settings::load();
+        // Services that aren't installed (e.g. no PostgreSQL) are skipped.
+        let ids: Vec<&'static str> = SERVICES
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| wanted.split(',').any(|w| w == *id) && selected(id, &settings).is_some())
+            .collect();
         let services = Arc::new(Services::default());
         for id in &ids {
             services.start(id);
@@ -492,14 +568,59 @@ mod tests {
 
         // Fetch the start page through Apache + PHP.
         use std::io::{Read, Write};
-        let settings = Settings::load();
-        let get = |host: &str| {
+        let request = |raw: String| {
             let mut conn = std::net::TcpStream::connect(("127.0.0.1", settings.ports.apache)).unwrap();
-            conn.write_all(format!("GET / HTTP/1.0\r\nHost: {host}\r\n\r\n").as_bytes()).unwrap();
+            conn.write_all(raw.as_bytes()).unwrap();
             let mut page = String::new();
             conn.read_to_string(&mut page).unwrap();
             page
         };
+        let get = |host: &str| request(format!("GET / HTTP/1.0\r\nHost: {host}\r\n\r\n"));
+
+        // Adminer: log in without a password and an empty server (= our own port), then list databases.
+        // Like a browser: open the login form (session cookies), post it, follow the redirect.
+        // Cookie jar: a later Set-Cookie replaces an earlier one of the same name (the session id changes
+        // at login).
+        let remember = |jar: &mut Vec<(String, String)>, reply: &str| {
+            for value in reply.lines().filter_map(|l| l.strip_prefix("Set-Cookie: ")) {
+                let pair = value.split(';').next().unwrap_or("").trim();
+                if let Some((name, val)) = pair.split_once('=') {
+                    jar.retain(|(n, _)| n != name);
+                    jar.push((name.to_string(), val.to_string()));
+                }
+            }
+        };
+        let header = |jar: &[(String, String)]| jar.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join("; ");
+        let adminer_login = |driver: &str, user: &str| {
+            let mut jar = Vec::new();
+            let form = request("GET /adminer/ HTTP/1.0\r\nHost: localhost\r\n\r\n".into());
+            remember(&mut jar, &form);
+            let cookie = header(&jar);
+            // The form's CSRF token, e.g. <input type='hidden' name='token' value='141040:945246'>.
+            let token = form.split("name='token' value='").nth(1).and_then(|r| r.split('\'').next()).unwrap_or_default();
+            let token = token.replace(':', "%3A");
+            let body = format!(
+                "token={token}&auth%5Bdriver%5D={driver}&auth%5Bserver%5D=&auth%5Busername%5D={user}&auth%5Bpassword%5D=&auth%5Bdb%5D="
+            );
+            let reply = request(format!(
+                "POST /adminer/ HTTP/1.0\r\nHost: localhost\r\nCookie: {cookie}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ));
+            let Some(location) = reply.lines().find_map(|l| l.strip_prefix("Location: ")).map(str::trim) else {
+                let error = reply.lines().find(|l| l.contains("class='error'") || l.contains("class=\"error\""));
+                return format!("login failed: {}", error.unwrap_or("no redirect"));
+            };
+            // Absolute, root-relative or (Adminer's usual) relative to /adminer/, e.g. "?username=root".
+            let path = match location.split_once("://") {
+                Some((_, rest)) => rest[rest.find('/').unwrap_or(rest.len())..].to_string(),
+                None if location.starts_with('/') => location.to_string(),
+                None => format!("/adminer/{location}"),
+            };
+            remember(&mut jar, &reply);
+            let page = request(format!("GET {path} HTTP/1.0\r\nHost: localhost\r\nCookie: {}\r\n\r\n", header(&jar)));
+            if page.is_empty() { format!("empty reply for {path}") } else { page }
+        };
+        let adminer_installed = confgen::adminer_file().is_some() && selected("php", &settings).is_some();
         if ids.contains(&"apache") {
             let page = get("localhost");
             println!("HTTP: {}", page.lines().next().unwrap_or_default());
@@ -512,6 +633,17 @@ mod tests {
                 let body = page.split("\r\n\r\n").nth(1).unwrap_or_default().trim();
                 println!("{}: {} | {}", site.name, page.lines().next().unwrap_or_default(), body.lines().last().unwrap_or_default());
                 assert!(!body.contains("Stackyard is running"), "{} served the www start page", site.name);
+            }
+
+            for (service, driver, user, database) in
+                [("mysql", "server", "root", "information_schema"), ("postgresql", "pgsql", "postgres", "template1")]
+            {
+                if adminer_installed && ids.contains(&service) {
+                    let page = adminer_login(driver, user);
+                    let ok = page.contains(database);
+                    println!("Adminer {service}: {}", if ok { "logged in, databases listed" } else { "FAILED" });
+                    assert!(ok, "Adminer could not log in to {service}:\n{}", &page[..page.len().min(3000)]);
+                }
             }
         }
 

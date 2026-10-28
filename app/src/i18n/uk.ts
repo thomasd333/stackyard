@@ -119,9 +119,13 @@ export const uk: Messages = {
   ports: "Порти",
   portApache: "Apache (HTTP)",
   portMysql: "MySQL",
+  portPostgresql: "PostgreSQL",
+  adminer: "Adminer",
+  adminerHint:
+    "Керуйте базами MySQL, PostgreSQL і SQL Server у браузері. Залиште поле «Сервер» порожнім для баз Stackyard: користувач MySQL root, PostgreSQL postgres, без пароля.",
   save: "Зберегти",
   portsHint:
-    "Змініть їх, якщо інша програма (напр. Laragon, XAMPP, IIS) уже використовує 80 або 3306. Запущена служба перезапуститься на новому порту.",
+    "Змініть їх, якщо інша програма (напр. Laragon, XAMPP, IIS) уже використовує 80, 3306 або 5432. Запущена служба перезапуститься на новому порту.",
   settingsRecovered:
     "Не вдалося прочитати config\\settings.json ({error}). Його збережено як settings.json.broken і відновлено останні коректні налаштування.",
   quit: "Вийти",

@@ -7,13 +7,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::paths::{self, fwd};
-use crate::settings::Site;
+use crate::settings::{Ports, Site};
 use crate::sites;
 
 const HTTPD_CONF: &str = include_str!("../templates/httpd.conf");
 const PHP_INI: &str = include_str!("../templates/php.ini");
 const MY_INI: &str = include_str!("../templates/my.ini");
 const WWW_INDEX: &str = include_str!("../templates/index.php");
+const ADMINER_PHP: &str = include_str!("../templates/adminer.php");
 
 const APACHE_MODULES: &[&str] = &[
     "access_compat", "actions", "alias", "allowmethods", "auth_basic", "authn_core", "authn_file",
@@ -204,7 +205,46 @@ fn pe_imports(path: &Path) -> Vec<String> {
     fs::read(path).ok().and_then(|data| parse(&data)).unwrap_or_default()
 }
 
-pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, port: u16, sites: &[Site]) -> GenResult<PathBuf> {
+/// Adminer, `bin\adminer\adminer-<version>.php` (the newest when there are several).
+pub fn adminer_file() -> Option<PathBuf> {
+    let mut files: Vec<PathBuf> = fs::read_dir(paths::bin_dir().join("adminer"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            name.starts_with("adminer") && name.ends_with(".php")
+        })
+        .collect();
+    files.sort_by(|a, b| crate::tools::natural_cmp(&b.to_string_lossy(), &a.to_string_lossy()));
+    files.into_iter().next()
+}
+
+/// Writes `config\adminer\index.php` and returns the Apache block that serves it at /adminer/ to this
+/// computer only, or a comment when Adminer (or PHP) is missing.
+fn write_adminer(ports: &Ports, has_php: bool) -> GenResult<String> {
+    let Some(adminer) = adminer_file().filter(|_| has_php) else {
+        return Ok("# Adminer is not installed (bin/adminer/adminer-*.php)".into());
+    };
+    let dir = paths::config_dir().join("adminer");
+    let index = fill(
+        ADMINER_PHP,
+        &[
+            ("ADMINER", fwd(&adminer)),
+            ("MYSQL_PORT", ports.mysql.to_string()),
+            ("POSTGRESQL_PORT", ports.postgresql.to_string()),
+        ],
+    );
+    write(&dir.join("index.php"), &index)?;
+    Ok(format!(
+        "Alias /adminer \"{dir}\"\n<Directory \"{dir}\">\n    Require local\n    DirectoryIndex index.php\n</Directory>",
+        dir = fwd(&dir)
+    ))
+}
+
+pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, ports: &Ports, sites: &[Site]) -> GenResult<PathBuf> {
+    let port = ports.apache;
     let modules_dir = apache_dir.join("modules");
     let preloads = php_dir.map(|dir| php_preloads(dir, apache_dir)).unwrap_or_default();
     let modules: Vec<String> = preloads
@@ -241,6 +281,7 @@ pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, port: u16, sites:
             ("MODULES", modules.join("\n")),
             ("PHP", php),
             ("SITES", sites::apache_vhosts(sites, port)),
+            ("ADMINER", write_adminer(ports, php_dir.is_some())?),
         ],
     );
     let path = paths::config_dir().join("apache/httpd.conf");
