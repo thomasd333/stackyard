@@ -63,3 +63,11 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
   additions in config\apache|php|mysql\conf.d\), logs\.
 - Problems: send logs\stackyard.log plus the log of the failing service (apache_error.log,
   php_error.log or mysql_error.log) and a screenshot of the message.
+
+
+5. SUPPORT
+----------
+Stackyard is free. My Claude subscription isn't. Chip in a coffee?
+https://ko-fi.com/thomasd333
+
+Built with Claude Code. Not affiliated with or endorsed by Anthropic.

@@ -26,6 +26,9 @@ pub struct VersionCache(Mutex<HashMap<PathBuf, Option<String>>>);
 
 type CmdResult<T> = Result<T, String>;
 
+/// "Chip in a coffee" link in Settings > About.
+const SUPPORT_URL: &str = "https://ko-fi.com/thomasd333";
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolInfo {
@@ -360,7 +363,8 @@ pub fn stop_all(services: State<Arc<Services>>) -> Vec<ServiceInfo> {
     services.snapshot(&Settings::load())
 }
 
-/// Opens a folder of the installation in Explorer, or the local site in the default browser.
+/// Opens a folder of the installation in Explorer, or a URL (local site, Adminer, support page) in the
+/// default browser.
 #[tauri::command]
 pub fn open_location(target: String) -> CmdResult<()> {
     let arg: std::ffi::OsString = match target.as_str() {
@@ -370,13 +374,14 @@ pub fn open_location(target: String) -> CmdResult<()> {
         "config" => paths::config_dir().into(),
         "site" => sites::url(None, Settings::load().ports.apache).into(),
         "adminer" => adminer_url(Settings::load().ports.apache).into(),
+        "support" => SUPPORT_URL.into(),
         // "site:<name>" opens a virtual host.
         _ => match target.strip_prefix("site:") {
             Some(name) => sites::url(Some(&sites::normalize_name(name)?), Settings::load().ports.apache).into(),
             None => return Err(format!("Unknown location: {target}")),
         },
     };
-    if !target.starts_with("site") && target != "adminer" {
+    if matches!(target.as_str(), "root" | "www" | "logs" | "config") {
         confgen::ensure_layout()?;
     }
     std::process::Command::new("explorer.exe")

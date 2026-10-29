@@ -615,6 +615,15 @@ function settingsTab(s: AppState, dis: string): string {
     <section>
       <div class="section-head"><h2>${esc(t("folders"))}</h2></div>
       <div class="form-row">${folders}</div>
+    </section>
+
+    <section class="about">
+      <div class="section-head"><h2>${esc(t("about"))}</h2></div>
+      <p>${esc(t("appName"))} ${esc(s.version)} · ${esc(t("aboutText"))}</p>
+      <p>
+        ${esc(t("supportText"))}
+        <button class="link" data-open="support" ${tip(t("supportHint"))}>☕ ${esc(t("supportLink"))}</button>
+      </p>
     </section>`;
 }
 

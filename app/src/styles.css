@@ -499,6 +499,17 @@ button.primary {
   padding: 4px 6px;
 }
 
+.about p {
+  margin: 4px 0;
+  color: var(--muted);
+}
+
+.about button.link {
+  margin-left: 4px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Tabs */
 .tabs {
   display: flex;
