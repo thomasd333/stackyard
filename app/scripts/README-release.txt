@@ -65,8 +65,13 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
   php_error.log or mysql_error.log) and a screenshot of the message.
 
 
-5. SUPPORT
-----------
+5. ABOUT
+--------
+Website: https://stackyard.lifeart.com.pl/
+Source code, new versions and bug reports: https://github.com/thomasd333/stackyard
+Stackyard is free software under the MIT License (LICENSE.txt). The tools in bin\ keep their own
+licenses, see THIRD-PARTY.txt.
+
 Stackyard is free. My Claude subscription isn't. Chip in a coffee?
 https://ko-fi.com/thomasd333
 

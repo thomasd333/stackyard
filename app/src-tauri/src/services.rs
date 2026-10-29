@@ -190,7 +190,7 @@ impl Services {
         let port = configured_port(id, &settings);
         if !ports::is_free(port) {
             return Err(format!(
-                "Port {port} is already in use by {}.\nStop that program or change the port in config\\settings.json.",
+                "Port {port} is already in use by {}.\nStop that program or change the port in Settings > Ports.",
                 ports::describe_owner(port)
             ));
         }

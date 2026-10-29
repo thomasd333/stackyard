@@ -1,0 +1,57 @@
+Third-party software in this package
+====================================
+
+Stackyard itself (Stackyard.exe) is released under the MIT License, see LICENSE.txt.
+
+The bin\ folder contains programs made by other projects. They are unmodified official builds;
+only optional parts (debug symbols, documentation, headers, GUI extras) were left out to save space.
+Each program keeps its own license, listed below with the file that holds it and where to get the
+source code.
+
+Apache HTTP Server (Apache Lounge build)
+  License: Apache License 2.0 - bin\apache\<version>\LICENSE.txt and NOTICE.txt
+  Source:  https://httpd.apache.org/download.cgi   Build: https://www.apachelounge.com/
+
+PHP
+  License: PHP License - bin\php\<version>\license.txt
+  Source:  https://www.php.net/downloads.php   Windows builds: https://windows.php.net/
+
+MySQL Community Server
+  License: GNU General Public License version 2 - bin\mysql\<version>\LICENSE
+  Source:  https://dev.mysql.com/downloads/mysql/ (select "Source Code")
+           https://github.com/mysql/mysql-server
+
+PostgreSQL (EnterpriseDB binaries)
+  License: PostgreSQL License - bin\postgresql\<version>\server_license.txt and
+           commandlinetools_3rd_party_licenses.txt
+  Source:  https://www.postgresql.org/ftp/source/
+
+Node.js
+  License: MIT License and the licenses of its bundled parts - bin\nodejs\<version>\LICENSE
+  Source:  https://nodejs.org/dist/
+
+Git for Windows (PortableGit)
+  License: GNU General Public License version 2 and others - bin\git\LICENSE.txt
+  Source:  https://github.com/git-for-windows/git
+
+Python
+  License: Python Software Foundation License - https://docs.python.org/3/license.html
+  Source:  https://www.python.org/downloads/source/
+
+Composer
+  License: MIT License - https://github.com/composer/composer/blob/main/LICENSE
+  Source:  https://github.com/composer/composer
+
+Adminer
+  License: Apache License 2.0 or GNU General Public License version 2 (see the header of
+           bin\adminer\adminer-<version>.php)
+  Source:  https://github.com/vrana/adminer
+
+Microsoft Visual C++ Runtime (vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll next to Apache,
+PHP, MySQL and PostgreSQL)
+  Redistributable files under the Microsoft Visual Studio license terms:
+  https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
+
+GPL source code: MySQL and Git for Windows are covered by the GNU GPL. The source code of the exact
+versions in this package is available from the links above. If a link stops working, open an issue
+on the Stackyard GitHub page and the source will be provided.

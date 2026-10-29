@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stackyard: portable local web stack for Windows</title>
+<meta name="description" content="Free, portable Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git and Python for Windows, with a small app to run them. A light alternative to Laragon and XAMPP.">
+<meta property="og:title" content="Stackyard: portable local web stack for Windows">
+<meta property="og:description" content="Unzip, run, Start all. Apache, PHP, MySQL, PostgreSQL and more in one folder. Free and open source.">
+<meta property="og:image" content="https://stackyard.lifeart.com.pl/screenshots/services.png">
+<meta property="og:url" content="https://stackyard.lifeart.com.pl/">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --surface: #ffffff;
+    --text: #1d2330;
+    --muted: #5d6676;
+    --border: #e2e6ee;
+    --accent: #2768bd;
+    --accent-hover: #1f58a3;
+    --accent-soft: #e6effb;
+    --code-bg: #eef1f6;
+    --shadow: 0 10px 30px rgba(20, 40, 80, 0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181e;
+      --surface: #1d2129;
+      --text: #e6e9ef;
+      --muted: #9aa3b2;
+      --border: #2c323d;
+      --accent: #5aa2f0;
+      --accent-hover: #7bb5f4;
+      --accent-soft: #1f2d42;
+      --code-bg: #262b35;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-hover); }
+  code {
+    font-family: Consolas, "Cascadia Mono", ui-monospace, monospace;
+    font-size: 0.92em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+
+  /* Header */
+  header { border-bottom: 1px solid var(--border); background: var(--surface); }
+  header .wrap { display: flex; align-items: center; gap: 24px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 19px; color: var(--text); text-decoration: none; }
+  .brand img { width: 30px; height: 30px; }
+  nav { margin-left: auto; display: flex; gap: 20px; font-size: 15px; }
+  nav a { color: var(--muted); text-decoration: none; }
+  nav a:hover { color: var(--accent); }
+
+  /* Hero */
+  .hero { text-align: center; padding-top: 64px; padding-bottom: 40px; }
+  .hero h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.15; margin: 0 0 16px; letter-spacing: -0.5px; }
+  .hero p.lead { font-size: 19px; color: var(--muted); max-width: 680px; margin: 0 auto 28px; }
+  .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 12px 26px; border-radius: 8px; font-weight: 600;
+    text-decoration: none; border: 1px solid var(--border); color: var(--text); background: var(--surface);
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+  @media (prefers-color-scheme: dark) { .btn.primary, .btn.primary:hover { color: #0d1626; } }
+  .meta { margin-top: 14px; font-size: 14px; color: var(--muted); }
+  .shot { margin: 40px auto 0; max-width: 920px; }
+  .shot img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+
+  /* Sections */
+  section { padding: 48px 0; }
+  section h2 { font-size: 28px; margin: 0 0 8px; text-align: center; }
+  section p.sub { text-align: center; color: var(--muted); margin: 0 auto 32px; max-width: 640px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 22px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 20px; }
+  .gallery figure { margin: 0; }
+  .gallery img { width: 100%; height: auto; display: block; border-radius: 8px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+  .gallery figcaption { text-align: center; color: var(--muted); font-size: 14px; margin-top: 10px; }
+
+  table { width: 100%; max-width: 560px; margin: 0 auto; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  td { padding: 9px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  td:last-child { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  ol.steps { max-width: 680px; margin: 0 auto; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps li { counter-increment: step; position: relative; padding: 0 0 18px 48px; }
+  ol.steps li::before {
+    content: counter(step); position: absolute; left: 0; top: 0; width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent); font-weight: 700; display: grid; place-items: center;
+  }
+  .note { max-width: 680px; margin: 12px auto 0; color: var(--muted); font-size: 15px; }
+
+  details { max-width: 720px; margin: 0 auto 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0 18px; }
+  summary { cursor: pointer; padding: 14px 0; font-weight: 600; }
+  details p { margin: 0 0 14px; color: var(--muted); }
+
+  footer { border-top: 1px solid var(--border); padding: 32px 0 40px; color: var(--muted); font-size: 14px; text-align: center; }
+  footer p { margin: 6px 0; }
+  .coffee { font-size: 15px; }
+
+  @media (max-width: 600px) {
+    nav a.hide-sm { display: none; }
+    .hero { padding-top: 40px; padding-bottom: 24px; }
+    section { padding: 36px 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="icon.svg" alt="">Stackyard</a>
+    <nav>
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#start">Quick start</a>
+      <a class="hide-sm" href="#faq">FAQ</a>
+      <a href="https://github.com/thomasd333/stackyard">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero wrap">
+    <h1>Your local web stack,<br>in one portable folder</h1>
+    <p class="lead">Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git and Python for Windows, with a small
+      app to run them. Unzip, run, <b>Start all</b>. Free and open source.</p>
+    <div class="buttons">
+      <a class="btn primary" href="https://github.com/thomasd333/stackyard/releases/latest">Download for Windows</a>
+      <a class="btn" href="https://github.com/thomasd333/stackyard">View on GitHub</a>
+    </div>
+    <p class="meta">Windows 10/11 x64 · zip, no installer · MIT License</p>
+    <div class="shot">
+      <picture>
+        <source srcset="screenshots/services-dark.png" media="(prefers-color-scheme: dark)">
+        <img src="screenshots/services.png" width="920" height="470" alt="Stackyard window with Apache and MySQL running">
+      </picture>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>Everything a PHP project needs, nothing it doesn't</h2>
+      <p class="sub">A light alternative to Laragon, XAMPP or WAMP. No Windows services, no admin rights,
+        no installer: everything, settings and databases included, stays in the folder you unzipped.</p>
+      <div class="grid">
+        <div class="card"><h3>Start and stop with one click</h3>
+          <p>Apache, MySQL and PostgreSQL, one by one or all at once. Port conflicts are named, crashes are noticed and the log is shown.</p></div>
+        <div class="card"><h3>Versions side by side</h3>
+          <p>Keep PHP 8.3 and 8.5, or two Node.js versions, and switch from a list. Running services restart by themselves.</p></div>
+        <div class="card"><h3>Updates built in</h3>
+          <p>Check for and download new PHP, Node.js and Composer releases, verified with SHA-256.</p></div>
+        <div class="card"><h3>PATH without the pain</h3>
+          <p>Put the selected tools on your user PATH with a switch (with backups), or open a terminal that already has them.</p></div>
+        <div class="card"><h3>Virtual hosts in two clicks</h3>
+          <p><code>shop.localhost</code> → <code>www\shop\public</code>. No hosts file edits, no administrator prompt.</p></div>
+        <div class="card"><h3>Adminer included</h3>
+          <p>Browse MySQL and PostgreSQL in the browser, already logged in to your local servers.</p></div>
+        <div class="card"><h3>Lives in the tray</h3>
+          <p>Close the window and the services keep running. Optionally start with Windows and bring back what was running.</p></div>
+        <div class="card"><h3>Portable for real</h3>
+          <p>Move the folder to another drive or a USB stick: configs are regenerated and your PATH entries follow.</p></div>
+        <div class="card"><h3>Small and native</h3>
+          <p>A ~5 MB app written in Rust. Light and dark theme, seven languages.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="gallery">
+        <figure><a href="screenshots/tools.png"><img src="screenshots/tools.png" width="920" height="680" loading="lazy" alt="Tools and PATH tab"></a><figcaption>Tools, versions and PATH</figcaption></figure>
+        <figure><a href="screenshots/sites.png"><img src="screenshots/sites.png" width="920" height="460" loading="lazy" alt="Virtual hosts tab"></a><figcaption>Virtual hosts on *.localhost</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>What's in the download</h2>
+      <p class="sub">The Visual C++ runtime the servers need is included too, so there is nothing else to install.</p>
+      <table>
+        <tr><td>Apache (Apache Lounge)</td><td>2.4.69</td></tr>
+        <tr><td>PHP, Thread Safe x64</td><td>8.3</td></tr>
+        <tr><td>MySQL Community Server</td><td>8.4 LTS</td></tr>
+        <tr><td>PostgreSQL</td><td>18</td></tr>
+        <tr><td>Node.js</td><td>26</td></tr>
+        <tr><td>Composer</td><td>2</td></tr>
+        <tr><td>Git for Windows, portable</td><td>2.56</td></tr>
+        <tr><td>Python</td><td>3.13</td></tr>
+        <tr><td>Adminer</td><td>6.2</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="wrap">
+      <h2>Quick start</h2>
+      <p class="sub">About two minutes from download to <code>http://localhost/</code>.</p>
+      <ol class="steps">
+        <li><b>Download the zip</b> from the <a href="https://github.com/thomasd333/stackyard/releases/latest">releases page</a>.
+          Before unzipping: right-click › Properties › <b>Unblock</b>.</li>
+        <li><b>Unzip</b> to a folder with only English letters in its path, for example <code>D:\Stackyard</code>.</li>
+        <li><b>Run <code>Stackyard.exe</code>.</b> If SmartScreen warns you: <b>More info</b> › <b>Run anyway</b>.</li>
+        <li><b>Start all</b> and open <code>http://localhost/</code>. Your projects go in <code>www\</code>.</li>
+      </ol>
+      <p class="note">MySQL: user <code>root</code>, no password, port 3306. PostgreSQL: user <code>postgres</code>,
+        no password, port 5432.</p>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <h2>FAQ</h2>
+      <p class="sub">&nbsp;</p>
+      <details>
+        <summary>Is it really free?</summary>
+        <p>Yes. Stackyard is open source under the MIT License, with no paid tier and no nagging.
+          If it saves you time, you can <a href="https://ko-fi.com/thomasd333">buy me a coffee</a>.</p>
+      </details>
+      <details>
+        <summary>I'm coming from Laragon. How do I move?</summary>
+        <p>Quit Laragon (or change Stackyard's ports in Settings), copy your projects into <code>www\</code>
+          or add virtual hosts pointing at their current folders. <code>project.test</code> becomes
+          <code>project.localhost</code>. A MySQL 8.4 data folder can be copied over as is; the README in the
+          zip has the steps.</p>
+      </details>
+      <details>
+        <summary>Why does Windows warn me when I start it?</summary>
+        <p>The exe is not code-signed yet, so SmartScreen does not know it. Click <b>More info</b> ›
+          <b>Run anyway</b>. The source code is on GitHub and every release has a SHA-256 checksum.</p>
+      </details>
+      <details>
+        <summary>Why <code>.localhost</code> and not <code>.test</code>?</summary>
+        <p>Browsers resolve <code>*.localhost</code> to your own computer on their own, so Stackyard never has
+          to edit the hosts file or ask for administrator rights.</p>
+      </details>
+      <details>
+        <summary>Can I use other versions of PHP, MySQL or Node.js?</summary>
+        <p>Yes. Unzip any official build into <code>bin\&lt;tool&gt;\&lt;version&gt;\</code> and press
+          <b>Refresh</b>. PHP, Node.js and Composer can also be downloaded from the app.</p>
+      </details>
+      <details>
+        <summary>Does it change anything outside its folder?</summary>
+        <p>Only what you switch on: entries in your user PATH (a backup is kept before every change) and the
+          "start with Windows" entry. To uninstall, switch those off and delete the folder.</p>
+      </details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="coffee">Stackyard is free. My Claude subscription isn't. <a href="https://ko-fi.com/thomasd333">☕ Chip in a coffee?</a></p>
+    <p><a href="https://github.com/thomasd333/stackyard">GitHub</a> ·
+      <a href="https://github.com/thomasd333/stackyard/issues">Report a bug</a> ·
+      <a href="https://github.com/thomasd333/stackyard/blob/main/LICENSE">MIT License</a></p>
+    <p>Built with Claude Code. Not affiliated with or endorsed by Anthropic.</p>
+  </div>
+</footer>
+
+</body>
+</html>

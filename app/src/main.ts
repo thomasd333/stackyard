@@ -622,7 +622,7 @@ function settingsTab(s: AppState, dis: string): string {
       <p>${esc(t("appName"))} ${esc(s.version)} · ${esc(t("aboutText"))}</p>
       <p>
         ${esc(t("supportText"))}
-        <button class="link" data-open="support" ${tip(t("supportHint"))}>☕ ${esc(t("supportLink"))}</button>
+        <button class="link" data-open="support" ${tip(t("supportHint"))}>☕️ ${esc(t("supportLink"))}</button>
       </p>
     </section>`;
 }
