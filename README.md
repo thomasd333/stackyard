@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://github.com/thomasd333/stackyard/releases/latest"><b>Download</b></a> ·
-  <a href="https://stackyard.lifeart.com.pl/">Website</a> ·
+  <a href="https://lifeart.com.pl/stackyard/">Website</a> ·
   <a href="https://ko-fi.com/thomasd333">Chip in a coffee</a>
 </p>
 

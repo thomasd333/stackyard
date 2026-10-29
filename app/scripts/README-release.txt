@@ -67,7 +67,7 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
 
 5. ABOUT
 --------
-Website: https://stackyard.lifeart.com.pl/
+Website: https://lifeart.com.pl/stackyard/
 Source code, new versions and bug reports: https://github.com/thomasd333/stackyard
 Stackyard is free software under the MIT License (LICENSE.txt). The tools in bin\ keep their own
 licenses, see THIRD-PARTY.txt.
