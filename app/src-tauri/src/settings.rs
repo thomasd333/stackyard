@@ -127,6 +127,14 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(name)
 }
 
+/// Serialises saves, and load-change-save cycles (`Settings::update`): commands run on the main thread,
+/// but service threads save too, and every save goes through the same temp file.
+static SAVE_LOCK: Mutex<()> = Mutex::new(());
+
+fn save_lock() -> std::sync::MutexGuard<'static, ()> {
+    SAVE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Writes through a temp file and a rename, so a crash or power loss mid-write never leaves a half file.
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     let tmp = sibling(path, ".tmp");
@@ -134,7 +142,17 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     f.write_all(text.as_bytes())?;
     f.sync_all()?;
     drop(f);
-    std::fs::rename(&tmp, path)
+    // An editor or a virus scanner may hold the file open for a moment.
+    let mut attempt = 0;
+    loop {
+        match std::fs::rename(&tmp, path) {
+            Err(e) if attempt < 10 && e.kind() == io::ErrorKind::PermissionDenied => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            result => return result,
+        }
+    }
 }
 
 fn parse(text: &str) -> serde_json::Result<Settings> {
@@ -187,15 +205,34 @@ impl Settings {
     }
 
     pub fn save(&self) -> io::Result<()> {
+        let _lock = save_lock();
         std::fs::create_dir_all(paths::config_dir())?;
         self.save_to(&file())
     }
 
+    /// Loads the settings, applies `change` and saves them, with no other save in between (which a
+    /// separate `load` and `save` can't promise). Returns what was saved.
+    pub fn update(change: impl FnOnce(&mut Settings)) -> io::Result<Settings> {
+        let _lock = save_lock();
+        std::fs::create_dir_all(paths::config_dir())?;
+        Self::update_at(&file(), change)
+    }
+
+    fn update_at(path: &Path, change: impl FnOnce(&mut Settings)) -> io::Result<Settings> {
+        let mut settings = Self::load_from(path);
+        change(&mut settings);
+        settings.save_to(path)?;
+        Ok(settings)
+    }
+
     fn save_to(&self, path: &Path) -> io::Result<()> {
         let json = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
-        // The current file becomes the backup, but only while it is still valid.
-        if std::fs::read_to_string(path).is_ok_and(|s| parse(&s).is_ok()) {
-            std::fs::copy(path, sibling(path, ".bak"))?;
+        // The current file becomes the backup, but only while it is still valid. A failed copy only
+        // leaves an older backup; it must not lose the change being saved.
+        if std::fs::read_to_string(path).is_ok_and(|s| parse(&s).is_ok())
+            && let Err(e) = std::fs::copy(path, sibling(path, ".bak"))
+        {
+            applog::warn(format!("Cannot back up settings.json: {e}"));
         }
         write_atomic(path, &json)
     }
@@ -247,6 +284,25 @@ mod tests {
         assert!(std::fs::read_to_string(sibling(&path, ".broken")).unwrap().contains("3308"));
         // The file was rewritten, so the next load is quiet.
         assert_eq!(Settings::load_from(&path).ports.mysql, 3307);
+    }
+
+    #[test]
+    fn concurrent_updates_are_not_lost() {
+        let path = temp_file("concurrent");
+        Settings::default().save_to(&path).unwrap();
+        std::thread::scope(|s| {
+            for i in 0..8 {
+                let path = &path;
+                s.spawn(move || {
+                    let _lock = save_lock();
+                    Settings::update_at(path, |st| st.running.push(format!("svc{i}"))).unwrap();
+                });
+            }
+        });
+        let mut running = Settings::load_from(&path).running;
+        running.sort();
+        assert_eq!(running, (0..8).map(|i| format!("svc{i}")).collect::<Vec<_>>());
+        assert!(!sibling(&path, ".tmp").exists());
     }
 
     #[test]

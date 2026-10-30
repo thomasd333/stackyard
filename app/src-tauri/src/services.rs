@@ -40,7 +40,16 @@ struct Slot {
     message: Option<String>,
     proc: Option<Proc>,
     port: Option<u16>,
+    /// Stop was asked for while starting; the start thread stops the service as soon as it is up.
+    cancel: bool,
 }
+
+/// How long a database may take to accept connections. Generous on purpose: crash recovery or an
+/// in-place upgrade of a big datadir takes minutes, and killing it then does real damage.
+const DB_START_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// How long quitting waits for services that are still starting or stopping.
+const EXIT_WAIT: Duration = Duration::from_secs(60);
 
 #[derive(Serialize, PartialEq)]
 pub struct ServiceInfo {
@@ -90,6 +99,13 @@ impl Services {
             let mut slots = self.slots.lock().unwrap();
             let slot = slots.entry(id).or_default();
             reap(id, slot);
+            if slot.status == Status::Starting && slot.cancel {
+                // Started again before the stop asked for during the start took effect.
+                slot.cancel = false;
+                drop(slots);
+                remember(id, true);
+                return;
+            }
             if matches!(slot.status, Status::Starting | Status::Running | Status::Stopping) {
                 return;
             }
@@ -103,27 +119,40 @@ impl Services {
             let result = me.launch(id);
             let mut slots = me.slots.lock().unwrap();
             let slot = slots.entry(id).or_default();
-            *slot = match result {
+            let next = match result {
+                Ok((proc, _)) if slot.cancel => {
+                    slot.status = Status::Stopping;
+                    drop(slots);
+                    applog::info(format!("{id}: stop was requested during the start"));
+                    shutdown(id, proc);
+                    me.reset(id);
+                    return;
+                }
                 Ok((proc, port)) => {
                     applog::info(format!("{id}: running (PID {}, port {port})", proc.pid()));
-                    Slot { status: Status::Running, message: None, proc: Some(proc), port: Some(port) }
+                    Slot { status: Status::Running, proc: Some(proc), port: Some(port), ..Slot::default() }
                 }
                 Err(msg) => {
                     applog::error(format!("{id}: start failed: {msg}"));
                     Slot { status: Status::Error, message: Some(msg), ..Slot::default() }
                 }
             };
+            *slot = next;
         });
     }
 
     pub fn stop(self: &Arc<Self>, id: &'static str) {
         remember(id, false);
         let Some(proc) = self.take_for_stop(id) else {
-            // Stopping a failed service just clears its error.
             let mut slots = self.slots.lock().unwrap();
             let slot = slots.entry(id).or_default();
-            if slot.status == Status::Error {
-                *slot = Slot::default();
+            match slot.status {
+                // Stopping a failed service just clears its error.
+                Status::Error => *slot = Slot::default(),
+                // Not up yet: the start thread stops it once it is (killing it mid-start could leave a
+                // half-initialised datadir).
+                Status::Starting => slot.cancel = true,
+                _ => {}
             }
             return;
         };
@@ -161,7 +190,9 @@ impl Services {
         *self.slots.lock().unwrap().entry(id).or_default() = Slot::default();
     }
 
-    /// Gracefully stops everything and waits for it; used when the app exits.
+    /// Gracefully stops everything and waits for it; used when the app exits. Services that are still
+    /// starting or stopping on another thread are waited for (up to `EXIT_WAIT`): exiting closes their
+    /// Job Objects, which would kill e.g. MySQL in the middle of a clean shutdown.
     pub fn stop_all_blocking(&self) {
         let procs: Vec<(&'static str, Proc)> = self
             .slots
@@ -175,10 +206,47 @@ impl Services {
                 s.spawn(move || shutdown(id, proc));
             }
         });
+        let deadline = Instant::now() + EXIT_WAIT;
+        while self.cancel_transitions() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    /// Asks every service that is starting to stop once it is up; true while any is starting or stopping.
+    fn cancel_transitions(&self) -> bool {
+        let mut busy = false;
+        for slot in self.slots.lock().unwrap().values_mut() {
+            slot.cancel |= slot.status == Status::Starting;
+            busy |= matches!(slot.status, Status::Starting | Status::Stopping);
+        }
+        busy
+    }
+
+    fn cancelled(&self, id: &'static str) -> bool {
+        self.slots.lock().unwrap().get(id).is_some_and(|s| s.cancel)
     }
 
     fn set_message(&self, id: &'static str, message: &str) {
         self.slots.lock().unwrap().entry(id).or_default().message = Some(message.to_string());
+    }
+
+    /// Waits until the service accepts connections; on failure kills it and reports the log tail.
+    /// Returns early (with the process) when a stop is requested meanwhile.
+    fn wait_ready(&self, id: &'static str, mut proc: Proc, port: u16, timeout: Duration, logs: &[&Path]) -> StartResult {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(code) = proc.exited() {
+                return Err(explain_exit(code, &format!("Process exited during startup.\n{}", tail(logs, 6))));
+            }
+            if ports::is_listening(port) || self.cancelled(id) {
+                return Ok((proc, port));
+            }
+            if Instant::now() > deadline {
+                proc.kill();
+                return Err(format!("Not listening on port {port} after {}s.\n{}", timeout.as_secs(), tail(logs, 6)));
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
     }
 
     fn launch(&self, id: &'static str) -> StartResult {
@@ -236,8 +304,7 @@ impl Services {
         let log = paths::logs_dir().join("apache_console.log");
         let mut proc = process::spawn(&mut cmd, &log).map_err(|e| format!("Cannot start Apache: {e}"))?;
         proc.set_stop(Stop::Event(format!("ap{}_shutdown", proc.pid())));
-        wait_ready(proc, port, Duration::from_secs(15), &[&log, &paths::logs_dir().join("apache_error.log")])
-            .map(|p| (p, port))
+        self.wait_ready("apache", proc, port, Duration::from_secs(15), &[&log, &paths::logs_dir().join("apache_error.log")])
     }
 
     fn launch_mysql(&self, settings: &Settings, port: u16) -> StartResult {
@@ -285,9 +352,11 @@ impl Services {
             stops.insert(0, shutdown_as(format!("--defaults-extra-file={}", cnf.display())));
         }
         proc.set_stop(Stop::Commands(stops));
-        let proc = wait_ready(proc, port, Duration::from_secs(60), &[&log, &logs.join("mysql_error.log")])?;
-        ensure_shutdown_account(&mysql.dir, port);
-        Ok((proc, port))
+        let ready = self.wait_ready("mysql", proc, port, DB_START_TIMEOUT, &[&log, &logs.join("mysql_error.log")])?;
+        if !self.cancelled("mysql") {
+            ensure_shutdown_account(&mysql.dir, port);
+        }
+        Ok(ready)
     }
 }
 
@@ -334,7 +403,7 @@ impl Services {
         let mut stop = Command::new(bin.join("pg_ctl.exe"));
         stop.arg("stop").arg("-D").arg(&datadir).args(["-m", "fast", "-w", "-t", "30"]);
         proc.set_stop(Stop::Commands(vec![stop]));
-        wait_ready(proc, port, Duration::from_secs(60), &[&log]).map(|p| (p, port))
+        self.wait_ready("postgresql", proc, port, DB_START_TIMEOUT, &[&log])
     }
 }
 
@@ -359,12 +428,9 @@ fn shutdown_cnf() -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
+/// Runs a mysql.exe query; the timeout covers a server that accepts connections but doesn't answer.
 fn hidden_status(cmd: &mut Command) -> bool {
-    use std::os::windows::process::CommandExt;
-    use std::process::Stdio;
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
-    cmd.status().is_ok_and(|s| s.success())
+    process::run_quiet(cmd, Duration::from_secs(20))
 }
 
 /// Makes sure the shutdown-only account exists and matches shutdown.cnf. It can only be created while root
@@ -406,16 +472,17 @@ fn remember(id: &str, running: bool) {
     if cfg!(test) {
         return;
     }
-    let mut settings = Settings::load();
-    if settings.running.iter().any(|x| x == id) == running {
+    if Settings::load().running.iter().any(|x| x == id) == running {
         return;
     }
-    if running {
-        settings.running.push(id.to_string());
-    } else {
-        settings.running.retain(|x| x != id);
-    }
-    if let Err(e) = settings.save() {
+    // Runs on service threads too (a restart), concurrently with commands that save.
+    let saved = Settings::update(|s| {
+        s.running.retain(|x| x != id);
+        if running {
+            s.running.push(id.to_string());
+        }
+    });
+    if let Err(e) = saved {
         applog::warn(format!("Cannot save the running services: {e}"));
     }
 }
@@ -454,28 +521,11 @@ fn reap(id: &str, slot: &mut Slot) {
 }
 
 fn shutdown(id: &str, proc: Proc) {
-    if proc.shutdown(Duration::from_secs(if id == "mysql" { 30 } else { 10 })) {
+    // The databases may need a checkpoint first; pg_ctl itself waits up to 30 s (`-t 30`).
+    if proc.shutdown(Duration::from_secs(if id == "apache" { 10 } else { 30 })) {
         applog::info(format!("{id}: stopped"));
     } else {
         applog::warn(format!("{id}: did not stop cleanly, process tree was killed"));
-    }
-}
-
-/// Waits until the service accepts connections; on failure kills it and reports the log tail.
-fn wait_ready(mut proc: Proc, port: u16, timeout: Duration, logs: &[&Path]) -> Result<Proc, String> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(code) = proc.exited() {
-            return Err(explain_exit(code, &format!("Process exited during startup.\n{}", tail(logs, 6))));
-        }
-        if ports::is_listening(port) {
-            return Ok(proc);
-        }
-        if Instant::now() > deadline {
-            proc.kill();
-            return Err(format!("Not listening on port {port} after {}s.\n{}", timeout.as_secs(), tail(logs, 6)));
-        }
-        std::thread::sleep(Duration::from_millis(250));
     }
 }
 
@@ -490,11 +540,25 @@ fn explain_exit(code: Option<i32>, message: &str) -> String {
 fn tail(files: &[&Path], n: usize) -> String {
     let lines: Vec<String> = files
         .iter()
-        .filter_map(|f| std::fs::read(f).ok())
+        .filter_map(|f| read_end(f, TAIL_BYTES))
         .flat_map(|bytes| String::from_utf8_lossy(&bytes).lines().map(str::to_string).collect::<Vec<_>>())
         .filter(|l| !l.trim().is_empty())
         .collect();
     lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// How much of the end of a log `tail` reads; error logs grow to 10 MB before they are rotated.
+const TAIL_BYTES: u64 = 64 * 1024;
+
+/// The last `max` bytes of a file.
+fn read_end(path: &Path, max: u64) -> Option<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(max))).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// PATH for child processes: `extra` dirs first (so e.g. PHP finds its DLLs), then ours.
@@ -530,7 +594,6 @@ mod tests {
         }
     }
 
-    /// Starts and stops the real services from `bin/`: `cargo test start_stop_real -- --ignored --nocapture`.
     #[test]
     fn postgresql_major_version() {
         assert_eq!(major_version("postgresql-18.6"), Some(18));
@@ -538,6 +601,54 @@ mod tests {
         assert_eq!(major_version("default"), None);
     }
 
+    #[test]
+    fn tail_reads_only_the_end_of_a_big_log() {
+        let path = std::env::temp_dir().join(format!("stackyard-tail-{}.log", std::process::id()));
+        let mut text = "an old line that should not be read\n".repeat(10_000);
+        text.push_str("last but one\n\n  \nlast\n");
+        std::fs::write(&path, &text).unwrap();
+        assert!(text.len() as u64 > 4 * TAIL_BYTES);
+        assert_eq!(tail(&[&path], 2), "last but one\nlast");
+        assert_eq!(read_end(&path, TAIL_BYTES).unwrap().len() as u64, TAIL_BYTES);
+        assert_eq!(tail(&[&path.with_extension("missing")], 2), "");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn stop_while_starting_is_kept_until_the_start_ends() {
+        let services = Arc::new(Services::default());
+        let set = |status| services.slots.lock().unwrap().entry("apache").or_default().status = status;
+        set(Status::Starting);
+        services.stop("apache");
+        assert!(services.cancelled("apache"), "the stop must not be lost");
+        assert!(services.snapshot(&Settings::default()).iter().any(|s| s.id == "apache" && s.status == Status::Starting));
+        // Quitting waits while anything is starting or stopping, and asks starting services to stop.
+        set(Status::Stopped);
+        services.slots.lock().unwrap().entry("mysql").or_default().status = Status::Starting;
+        assert!(services.cancel_transitions());
+        assert!(services.cancelled("mysql"));
+        services.slots.lock().unwrap().entry("mysql").or_default().status = Status::Stopped;
+        assert!(!services.cancel_transitions());
+    }
+
+    /// A stop asked for during the start ends with the service stopped, not running:
+    /// `cargo test stop_during_start_real -- --ignored --nocapture` (uses the Apache port from settings).
+    #[test]
+    #[ignore]
+    fn stop_during_start_real() {
+        let port = Settings::load().ports.apache;
+        let services = Arc::new(Services::default());
+        services.start("apache");
+        services.stop("apache");
+        wait_while(&services, Status::Starting, Duration::from_secs(30));
+        let snap = wait_while(&services, Status::Stopping, Duration::from_secs(30));
+        let apache = snap.iter().find(|s| s.id == "apache").unwrap();
+        println!("apache {:?} pid={:?} msg={:?}", apache.status as u8, apache.pid, apache.message);
+        assert!(apache.status == Status::Stopped && apache.pid.is_none());
+        assert!(ports::is_free(port), "something still listens on {port}");
+    }
+
+    /// Starts and stops the real services from `bin/`: `cargo test start_stop_real -- --ignored --nocapture`.
     /// Set `STACKYARD_TEST_SERVICES=apache` to test only Apache (e.g. while another MySQL uses the datadir).
     #[test]
     #[ignore]

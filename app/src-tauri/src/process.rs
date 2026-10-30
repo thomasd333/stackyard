@@ -109,16 +109,16 @@ impl Proc {
 
     /// Requests a clean shutdown, then kills the tree if it is still alive after `timeout`.
     /// Returns true if the process stopped on its own (false = it had to be killed).
+    /// `timeout` covers the stop commands too: `mysqladmin shutdown` waits for the server, up to an hour.
     pub fn shutdown(mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let left = || deadline.saturating_duration_since(Instant::now());
         let requested = match self.stop.take() {
             Some(Stop::Event(name)) => signal_event(&name),
-            Some(Stop::Commands(cmds)) => cmds.into_iter().any(|mut cmd| {
-                cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW);
-                cmd.status().is_ok_and(|s| s.success())
-            }),
+            Some(Stop::Commands(cmds)) => cmds.into_iter().any(|mut cmd| run_quiet(&mut cmd, left())),
             None => false,
         };
-        if requested && self.wait_for_exit(timeout) {
+        if requested && self.wait_for_exit(left()) {
             return true;
         }
         self.kill();
@@ -149,6 +149,25 @@ pub fn spawn(cmd: &mut Command, log: &Path) -> io::Result<Proc> {
     Ok(Proc { child, job, stop: None })
 }
 
+/// Runs `cmd` without a window or output and waits up to `timeout`. True if it exited successfully in
+/// time; one that takes longer is killed.
+pub fn run_quiet(cmd: &mut Command, timeout: Duration) -> bool {
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW);
+    let Ok(mut child) = cmd.spawn() else { return false };
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
 /// Sets a named event; false if it does not exist.
 fn signal_event(name: &str) -> bool {
     let wide: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
@@ -160,5 +179,42 @@ fn signal_event(name: &str) -> bool {
         let ok = SetEvent(handle) != 0;
         CloseHandle(handle);
         ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A command that would run for ~10 s.
+    fn slow() -> Command {
+        let mut cmd = Command::new("ping");
+        cmd.args(["-n", "10", "127.0.0.1"]);
+        cmd
+    }
+
+    #[test]
+    fn run_quiet_kills_a_command_that_takes_too_long() {
+        let started = Instant::now();
+        assert!(!run_quiet(&mut slow(), Duration::from_millis(300)));
+        assert!(started.elapsed() < Duration::from_secs(3), "took {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn run_quiet_reports_the_exit_status() {
+        assert!(run_quiet(Command::new("cmd").args(["/c", "exit 0"]), Duration::from_secs(10)));
+        assert!(!run_quiet(Command::new("cmd").args(["/c", "exit 3"]), Duration::from_secs(10)));
+        assert!(!run_quiet(&mut Command::new("does-not-exist-stackyard.exe"), Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn shutdown_is_bounded_by_its_timeout_even_when_the_stop_command_hangs() {
+        let log = std::env::temp_dir().join(format!("stackyard-proc-{}.log", std::process::id()));
+        let mut proc = spawn(&mut slow(), &log).unwrap();
+        proc.set_stop(Stop::Commands(vec![slow(), slow()]));
+        let started = Instant::now();
+        assert!(!proc.shutdown(Duration::from_millis(500)), "the process should have been killed");
+        assert!(started.elapsed() < Duration::from_secs(3), "took {:?}", started.elapsed());
+        let _ = std::fs::remove_file(log);
     }
 }

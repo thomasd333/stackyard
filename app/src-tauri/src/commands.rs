@@ -244,6 +244,10 @@ fn apply_path(user_path: &mut UserPath, tool: &ToolDef, enable: bool, settings: 
     Ok(())
 }
 
+fn save_error(e: std::io::Error) -> String {
+    format!("Cannot save settings: {e}")
+}
+
 fn tool_by_id(id: &str) -> CmdResult<&'static ToolDef> {
     tools::find(id).ok_or_else(|| format!("Unknown tool: {id}"))
 }
@@ -281,10 +285,8 @@ pub fn set_tool_version(
     services: State<Arc<Services>>,
 ) -> CmdResult<AppState> {
     let tool = tool_by_id(&id)?;
-    let mut settings = Settings::load();
     applog::info(format!("{}: version set to {version}", tool.id));
-    settings.set_version(tool.id, version);
-    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    let settings = Settings::update(|s| s.set_version(tool.id, version)).map_err(save_error)?;
 
     // Keep PATH in sync when the tool is already there.
     let mut user_path = UserPath::read().map_err(|e| e.to_string())?;
@@ -402,9 +404,8 @@ pub fn set_terminal(
     if !terminal::SHELLS.contains(&shell.as_str()) {
         return Err(format!("Unknown shell: {shell}"));
     }
-    let mut settings = Settings::load();
-    settings.terminal = settings::Terminal { shell, windows_terminal, custom: custom.trim().to_string() };
-    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    let terminal = settings::Terminal { shell, windows_terminal, custom: custom.trim().to_string() };
+    Settings::update(|s| s.terminal = terminal).map_err(save_error)?;
     build_state(&cache)
 }
 
@@ -412,9 +413,7 @@ pub fn set_terminal(
 #[tauri::command]
 pub fn set_startup(with_windows: bool, restore_services: bool, cache: State<VersionCache>) -> CmdResult<AppState> {
     autostart::set(with_windows).map_err(|e| format!("Cannot change the Windows startup entry: {e}"))?;
-    let mut settings = Settings::load();
-    settings.startup = settings::Startup { with_windows, restore_services };
-    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    Settings::update(|s| s.startup = settings::Startup { with_windows, restore_services }).map_err(save_error)?;
     applog::info(format!("Startup: with Windows {with_windows}, restore services {restore_services}"));
     build_state(&cache)
 }
@@ -434,10 +433,9 @@ pub fn set_ports(
     if apache == mysql || apache == postgresql || mysql == postgresql {
         return Err("Apache, MySQL and PostgreSQL need different ports.".into());
     }
-    let mut settings = Settings::load();
-    let old = settings::Ports { ..settings.ports };
-    settings.ports = settings::Ports { apache, mysql, postgresql };
-    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    let mut old = settings::Ports::default();
+    Settings::update(|s| old = std::mem::replace(&mut s.ports, settings::Ports { apache, mysql, postgresql }))
+        .map_err(save_error)?;
     applog::info(format!("Ports set to Apache {apache}, MySQL {mysql}, PostgreSQL {postgresql}"));
     // Apache also restarts for a database port: Adminer's defaults are written when it starts.
     if (old.apache, old.mysql, old.postgresql) != (apache, mysql, postgresql) {
@@ -465,10 +463,8 @@ pub fn set_ui(app: tauri::AppHandle, theme: String, language: String, cache: Sta
     if language != "system" && !i18n::LANGUAGES.contains(&language.as_str()) {
         return Err(format!("Unknown language: {language}"));
     }
-    let mut settings = Settings::load();
     i18n::apply_theme(&app, &theme);
-    settings.ui = settings::Ui { theme, language };
-    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    Settings::update(|s| s.ui = settings::Ui { theme, language }).map_err(save_error)?;
     build_state(&cache)
 }
 
@@ -508,13 +504,20 @@ pub fn add_site(
 ) -> CmdResult<AppState> {
     let name = sites::normalize_name(&name)?;
     let root = sites::normalize_root(&root)?;
-    let mut settings = Settings::load();
-    if settings.sites.iter().any(|s| s.name == name) {
-        return Err(format!("Site {name}.{} already exists.", sites::TLD));
+    let mut exists = false;
+    let log = format!("Sites: added {name}.{} -> {root}", sites::TLD);
+    let site = settings::Site { name, root };
+    Settings::update(|s| {
+        exists = s.sites.iter().any(|x| x.name == site.name);
+        if !exists {
+            s.sites.push(site.clone());
+        }
+    })
+    .map_err(save_error)?;
+    if exists {
+        return Err(format!("Site {}.{} already exists.", site.name, sites::TLD));
     }
-    applog::info(format!("Sites: added {name}.{} -> {root}", sites::TLD));
-    settings.sites.push(settings::Site { name, root });
-    settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
+    applog::info(log);
     services.restart("apache");
     build_state(&cache)
 }
@@ -522,12 +525,9 @@ pub fn add_site(
 /// Removes a site from the Apache config; its files are left alone.
 #[tauri::command]
 pub fn remove_site(name: String, cache: State<VersionCache>, services: State<Arc<Services>>) -> CmdResult<AppState> {
-    let mut settings = Settings::load();
-    let before = settings.sites.len();
-    settings.sites.retain(|s| s.name != name);
-    if settings.sites.len() != before {
+    if Settings::load().sites.iter().any(|s| s.name == name) {
+        Settings::update(|s| s.sites.retain(|x| x.name != name)).map_err(save_error)?;
         applog::info(format!("Sites: removed {name}.{}", sites::TLD));
-        settings.save().map_err(|e| format!("Cannot save settings: {e}"))?;
         services.restart("apache");
     }
     build_state(&cache)

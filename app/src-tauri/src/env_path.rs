@@ -134,12 +134,14 @@ fn encode_utf16(s: &str) -> Vec<u8> {
     s.encode_utf16().chain(Some(0)).flat_map(u16::to_le_bytes).collect()
 }
 
-/// Saves the current raw PATH to `config/backups/path-<unix-time>.txt`, keeping the newest few.
+/// Saves the current raw PATH to `config/backups/path-<unix-time-ms>.txt`, keeping the newest few.
+/// Milliseconds, so two changes within a second don't overwrite the older backup with the newer PATH
+/// (they still sort after the older `path-<seconds>.txt` names).
 fn backup_current() -> io::Result<()> {
     let dir = paths::config_dir().join("backups");
     std::fs::create_dir_all(&dir)?;
     let current = UserPath::read()?.entries.join(";");
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     std::fs::write(dir.join(format!("path-{stamp}.txt")), current)?;
 
     let mut backups: Vec<_> = std::fs::read_dir(&dir)?

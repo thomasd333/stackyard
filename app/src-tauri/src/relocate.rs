@@ -24,8 +24,8 @@ pub fn on_startup() {
         migrate_path(&Path::new(&previous).join("bin"), &paths::bin_dir());
     }
     if settings.root.as_deref() != Some(current_str.as_str()) {
-        settings.root = Some(current_str);
-        if let Err(e) = settings.save() {
+        settings.root = Some(current_str.clone());
+        if let Err(e) = Settings::update(|s| s.root = Some(current_str)) {
             applog::warn(format!("Cannot save settings: {e}"));
         }
     }

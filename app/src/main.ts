@@ -215,9 +215,13 @@ async function serviceCmd(cmd: string, args: Record<string, unknown> = {}) {
 
 let pollTimer: number | undefined;
 
-/** Polls quickly while a service is in transition, slowly otherwise (to notice crashes). */
+/**
+ * Polls quickly while a service is in transition, slowly otherwise (to notice crashes). Not while the
+ * window is hidden in the tray (the tray watches the services itself); showing it polls right away.
+ */
 function schedulePoll() {
   clearTimeout(pollTimer);
+  if (document.hidden) return;
   const transitioning = services.some((s) => s.status === "starting" || s.status === "stopping");
   pollTimer = window.setTimeout(async () => {
     try {
@@ -231,6 +235,16 @@ function schedulePoll() {
     }
   }, transitioning ? 400 : 2000);
 }
+
+document.addEventListener("visibilitychange", async () => {
+  if (document.hidden) return clearTimeout(pollTimer);
+  try {
+    services = await invoke<ServiceInfo[]>("get_services");
+    render();
+  } finally {
+    schedulePoll();
+  }
+});
 
 const jobActive = (j: Job | null) => !!j && j.phase !== "done" && j.phase !== "error";
 
