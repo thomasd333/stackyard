@@ -6,7 +6,7 @@
 #   npm run release -- -KeepFolder   keep the unpacked folders next to the zips
 #   npm run release -- -NoLite       skip the lite zip
 #
-# Two zips: the full one, and "lite" (the same without MySQL and PostgreSQL, about half the size).
+# Two zips: the full one, and "lite" (the same without MySQL and PostgreSQL, about 120 MB smaller).
 #
 # Nothing from this machine goes in: no www\, data\, config\, logs\, tmp\ or backup\, and the files in
 # bin\ that Stackyard, Laragon or the tools themselves wrote (php.ini, my.ini, Apache logs, ...).
