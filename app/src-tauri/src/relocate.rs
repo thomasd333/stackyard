@@ -33,7 +33,7 @@ pub fn on_startup() {
     // php.exe from PATH reads the php.ini in its own folder; keep its paths current even if
     // Apache is never started in this location.
     if let Some(php) = services::selected("php", &settings)
-        && let Err(e) = confgen::ensure_layout().and_then(|_| confgen::write_php(&php.dir))
+        && let Err(e) = confgen::ensure_layout().and_then(|_| confgen::write_php(&php.dir, &settings))
     {
         applog::warn(format!("Cannot refresh php.ini for {}: {e}", php.label));
     }

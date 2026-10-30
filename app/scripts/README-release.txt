@@ -1,8 +1,8 @@
 Stackyard {{VERSION}} - portable local dev stack for Windows 10/11 (x64)
 =========================================================================
 
-Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git, Python and Adminer (a database manager in
-the browser) in one folder, with a small window (and a tray
+Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git, Python, Adminer (a database manager in
+the browser) and Mailpit (catches outgoing mail) in one folder, with a small window (and a tray
 icon) to start/stop services, switch versions, manage the PATH and add local sites. Everything,
 settings included, stays inside this folder. The window is in English, German, Spanish, French,
 Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).{{EDITION}}
@@ -33,6 +33,13 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
 - Adminer: the "Adminer" button in the Services tab (Apache must be running), or
   http://localhost/adminer/. Leave "Server" and "Username" empty for Stackyard's own MySQL (root) or
   PostgreSQL (postgres); it also connects to SQL Server. Only this computer can open it.
+- Mail: start Mailpit in the Services tab. PHP's mail() then delivers to it, and "Open inbox" shows
+  the messages; nothing leaves your computer. For Laravel and other apps with their own SMTP settings:
+  host 127.0.0.1, port 1025, no user, no encryption.
+- Database backups: the "Back up" button next to a running MySQL or PostgreSQL writes a .sql file to
+  backup\databases\. Load it with Adminer's "Import", or mysql / psql.
+- Tools & PATH tab > PHP: switch Xdebug on (downloaded from xdebug.org on first use; step debugging
+  on port 9003 when a request asks for it) and turn PHP extensions on or off.
 - Tools & PATH tab: switch on PATH for the tools you want in every terminal (php, composer, node,
   git...). Open a new terminal afterwards. "Open terminal" in the Services tab works without that.
 - Closing the window keeps Stackyard and its services running in the tray (icon next to the clock).
@@ -57,15 +64,18 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
 
 4. MORE
 -------
-- New tool versions: PHP, Node.js and Composer from Tools & PATH > "Check for updates". Any other
+- New tool versions: PHP, Node.js, Composer and Mailpit from Tools & PATH > "Check for updates". Any other
   version: unzip into bin\<tool>\<version-folder>\ and press Refresh (PHP must be Thread Safe x64).
 - New Stackyard versions: Settings > About > "Check for updates" (or switch on the daily check in
   Settings > Startup). Download the new zip, quit Stackyard and copy the new Stackyard.exe over the
   old one; your bin\, www\, data\ and config\ stay as they are.
 - Folders: www\ (sites), data\ (databases), config\ (settings and generated configs; put your own
   additions in config\apache|php|mysql\conf.d\), logs\.
+- Different MySQL or PostgreSQL versions keep their databases in different folders
+  (data\mysql-8.4, data\postgresql-18...): after switching to another series you start with no
+  databases. Back them up first and import the file into the new version.
 - Problems: send logs\stackyard.log plus the log of the failing service (apache_error.log,
-  php_error.log or mysql_error.log) and a screenshot of the message.
+  php_error.log, mysql_error.log, postgresql.log or mailpit.log) and a screenshot of the message.
 
 
 5. ABOUT

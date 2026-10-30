@@ -18,7 +18,8 @@ use crate::process::{self, Proc, Stop};
 use crate::settings::{self, Settings};
 use crate::tools::{self, Install};
 
-pub const SERVICES: &[(&str, &str)] = &[("apache", "Apache"), ("mysql", "MySQL"), ("postgresql", "PostgreSQL")];
+pub const SERVICES: &[(&str, &str)] =
+    &[("apache", "Apache"), ("mysql", "MySQL"), ("postgresql", "PostgreSQL"), ("mailpit", "Mailpit")];
 
 /// Windows STATUS_DLL_NOT_FOUND, typically a missing Visual C++ Redistributable.
 const DLL_NOT_FOUND: i32 = 0xC000_0135_u32 as i32;
@@ -266,6 +267,7 @@ impl Services {
             "apache" => self.launch_apache(&settings, port),
             "mysql" => self.launch_mysql(&settings, port),
             "postgresql" => self.launch_postgresql(&settings, port),
+            "mailpit" => self.launch_mailpit(&settings, port),
             _ => Err(format!("Unknown service: {id}")),
         }
     }
@@ -275,7 +277,7 @@ impl Services {
         let php = selected("php", settings);
         // Apache's port comes from the caller (checked free); the others are only for Adminer's defaults.
         let ports = settings::Ports { apache: port, ..settings.ports };
-        let conf = confgen::write_apache(&apache.dir, php.as_ref().map(|p| p.dir.as_path()), &ports, &settings.sites)?;
+        let conf = confgen::write_apache(&apache.dir, php.as_ref().map(|p| p.dir.as_path()), &ports, settings)?;
         let httpd = apache.dir.join("bin/httpd.exe");
         let extra_path: Vec<PathBuf> = php.iter().map(|p| p.dir.clone()).chain([apache.dir.join("bin")]).collect();
         applog::info(format!(
@@ -364,8 +366,7 @@ impl Services {
     fn launch_postgresql(&self, settings: &Settings, port: u16) -> StartResult {
         let pg = selected("postgresql", settings).ok_or("PostgreSQL is not installed (bin\\postgresql).")?;
         let major = major_version(&pg.label);
-        // One data directory per major version: a new major can't read an older one without pg_upgrade.
-        let datadir = paths::data_dir().join(major.map_or_else(|| pg.label.clone(), |m| format!("postgresql-{m}")));
+        let datadir = postgresql_datadir(&pg.label);
         let bin = pg.dir.join("bin");
         let logs = paths::logs_dir();
         applog::info(format!("postgresql: {} on port {port}, datadir {}", pg.label, datadir.display()));
@@ -405,6 +406,144 @@ impl Services {
         proc.set_stop(Stop::Commands(vec![stop]));
         self.wait_ready("postgresql", proc, port, DB_START_TIMEOUT, &[&log])
     }
+
+    /// Mailpit: catches what PHP's mail() (or an app's SMTP settings) sends, shown in a web inbox.
+    fn launch_mailpit(&self, settings: &Settings, port: u16) -> StartResult {
+        let mailpit = selected("mailpit", settings).ok_or("Mailpit is not installed (bin\\mailpit).")?;
+        let smtp = settings.ports.smtp;
+        if !ports::is_free(smtp) {
+            return Err(format!(
+                "SMTP port {smtp} is already in use by {}.\nStop that program or change the port in Settings > Ports.",
+                ports::describe_owner(smtp)
+            ));
+        }
+        // Messages are kept across restarts (Mailpit itself trims them to the newest 500).
+        let data = paths::data_dir().join("mailpit");
+        std::fs::create_dir_all(&data).map_err(|e| format!("Cannot create {}: {e}", data.display()))?;
+        applog::info(format!("mailpit: {} on port {port}, SMTP {smtp}", mailpit.label));
+        let log = paths::logs_dir().join("mailpit.log");
+        let mut cmd = Command::new(mailpit.dir.join("mailpit.exe"));
+        cmd.arg("--listen")
+            .arg(format!("127.0.0.1:{port}"))
+            .arg("--smtp")
+            .arg(format!("127.0.0.1:{smtp}"))
+            .arg("--database")
+            .arg(data.join("mailpit.db"))
+            // No network unless the user asks (Stackyard's own policy).
+            .arg("--disable-version-check");
+        let proc = process::spawn(&mut cmd, &log).map_err(|e| format!("Cannot start Mailpit: {e}"))?;
+        self.wait_ready("mailpit", proc, port, Duration::from_secs(30), &[&log])
+    }
+
+    /// Dumps the databases of a running MySQL or PostgreSQL into `backup\databases\` and returns the
+    /// file. MySQL: every database except the system ones (so it loads into another MySQL version);
+    /// PostgreSQL: the whole cluster with its roles (pg_dumpall).
+    pub fn backup(&self, id: &'static str) -> Result<PathBuf, String> {
+        let settings = Settings::load();
+        let name = SERVICES.iter().find(|(s, _)| *s == id).map(|(_, n)| *n).ok_or("Only databases can be backed up.")?;
+        let port = {
+            let mut slots = self.slots.lock().unwrap();
+            let slot = slots.entry(id).or_default();
+            reap(id, slot);
+            if slot.status != Status::Running {
+                return Err(format!("Start {name} first: the backup is made from the running server."));
+            }
+            slot.port.unwrap_or_else(|| configured_port(id, &settings))
+        };
+        let install = selected(id, &settings).ok_or_else(|| format!("{name} is not installed."))?;
+        let datadir = datadir(id, &install.label).ok_or("Only databases can be backed up.")?;
+        let dir = paths::backups_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+        let stem = datadir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| id.into());
+        let file = dir.join(format!("{stem}-{}.sql", applog::file_stamp()));
+        let bin = install.dir.join("bin");
+        let port_arg = format!("--port={port}");
+
+        let mut cmd = if id == "mysql" {
+            let databases = mysql_databases(&bin, port)?;
+            if databases.is_empty() {
+                return Err("There is nothing to back up: MySQL has only its system databases.".into());
+            }
+            let mut cmd = Command::new(bin.join("mysqldump.exe"));
+            // (mysqldump has no --connect-timeout; mysql_databases just reached the server.)
+            cmd.args(["--user=root", "--host=127.0.0.1", &port_arg])
+                .args(["--single-transaction", "--routines", "--events", "--triggers", "--default-character-set=utf8mb4"])
+                .arg(format!("--result-file={}", file.display()))
+                .arg("--databases")
+                .args(databases);
+            cmd
+        } else {
+            let mut cmd = Command::new(bin.join("pg_dumpall.exe"));
+            cmd.args(["-h", "127.0.0.1", "-p", &port.to_string(), "-U", "postgres", "-f"]).arg(&file);
+            cmd
+        };
+        applog::info(format!("{id}: backing up to {}", file.display()));
+        let log = paths::logs_dir().join("backup.log");
+        let mut proc = process::spawn(&mut cmd, &log).map_err(|e| format!("Cannot run the backup: {e}"))?;
+        let finished = proc.wait_for_exit(BACKUP_TIMEOUT);
+        let code = proc.exited().flatten();
+        if !finished || code != Some(0) {
+            if !finished {
+                proc.kill();
+            }
+            let _ = std::fs::remove_file(&file);
+            let reason = if finished { tail(&[&log], 6) } else { format!("Not finished after {} minutes.", BACKUP_TIMEOUT.as_secs() / 60) };
+            applog::error(format!("{id}: backup failed: {reason}"));
+            let hint = if reason.contains("Access denied") {
+                "\nroot has a password: export the databases with Adminer instead."
+            } else {
+                ""
+            };
+            return Err(format!("The backup failed.\n{reason}{hint}"));
+        }
+        applog::info(format!("{id}: backup saved ({} bytes)", std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0)));
+        Ok(file)
+    }
+}
+
+/// How long a database backup may take.
+const BACKUP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+/// MySQL's databases without the system ones, as root without a password.
+fn mysql_databases(bin: &Path, port: u16) -> Result<Vec<String>, String> {
+    const SYSTEM: &[&str] = &["information_schema", "mysql", "performance_schema", "sys"];
+    let out = Command::new(bin.join("mysql.exe"))
+        .args(["--user=root", "--host=127.0.0.1", "--connect-timeout=5", &format!("--port={port}")])
+        .args(["--batch", "--skip-column-names", "-e", "SHOW DATABASES"])
+        .stdin(std::process::Stdio::null())
+        .creation_flags_hidden()
+        .output()
+        .map_err(|e| format!("Cannot run mysql.exe: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let hint = if err.contains("Access denied") { "\nroot has a password: export the databases with Adminer instead." } else { "" };
+        return Err(format!("Cannot list the databases: {err}{hint}"));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|db| !db.is_empty() && !SYSTEM.contains(&db.to_lowercase().as_str()))
+        .map(str::to_string)
+        .collect())
+}
+
+/// Data directory of a database version: MySQL per major.minor, PostgreSQL per major (neither can read
+/// an older format without an upgrade step). None for other tools.
+pub fn datadir(id: &str, label: &str) -> Option<PathBuf> {
+    match id {
+        "mysql" => Some(confgen::mysql_datadir(label)),
+        "postgresql" => Some(postgresql_datadir(label)),
+        _ => None,
+    }
+}
+
+/// True when the data directory has been initialised (it holds databases, at least the system ones).
+pub fn has_data(id: &str, dir: &Path) -> bool {
+    dir.join(if id == "mysql" { "mysql.ibd" } else { "PG_VERSION" }).exists()
+}
+
+fn postgresql_datadir(label: &str) -> PathBuf {
+    paths::data_dir().join(major_version(label).map_or_else(|| label.to_string(), |m| format!("postgresql-{m}")))
 }
 
 /// The major version from an install folder name, e.g. 18 for `postgresql-18.6`.
@@ -491,6 +630,7 @@ fn configured_port(id: &str, settings: &Settings) -> u16 {
     match id {
         "mysql" => settings.ports.mysql,
         "postgresql" => settings.ports.postgresql,
+        "mailpit" => settings.ports.mailpit,
         _ => settings.ports.apache,
     }
 }
@@ -513,6 +653,7 @@ fn reap(id: &str, slot: &mut Slot) {
     let log = logs.join(match id {
         "mysql" => "mysql_error.log",
         "postgresql" => "postgresql.log",
+        "mailpit" => "mailpit.log",
         _ => "apache_error.log",
     });
     let message = explain_exit(code, &format!("Process exited unexpectedly.\n{}", tail(&[&log], 4)));
@@ -521,6 +662,12 @@ fn reap(id: &str, slot: &mut Slot) {
 }
 
 fn shutdown(id: &str, proc: Proc) {
+    // Mailpit has no stop command and nothing to flush (its SQLite database survives a kill).
+    if id == "mailpit" {
+        proc.kill();
+        applog::info(format!("{id}: stopped"));
+        return;
+    }
     // The databases may need a checkpoint first; pg_ctl itself waits up to 30 s (`-t 30`).
     if proc.shutdown(Duration::from_secs(if id == "apache" { 10 } else { 30 })) {
         applog::info(format!("{id}: stopped"));
@@ -657,7 +804,7 @@ mod tests {
             use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SetErrorMode};
             SetErrorMode(SEM_FAILCRITICALERRORS);
         }
-        let wanted = std::env::var("STACKYARD_TEST_SERVICES").unwrap_or_else(|_| "apache,mysql,postgresql".into());
+        let wanted = std::env::var("STACKYARD_TEST_SERVICES").unwrap_or_else(|_| "apache,mysql,postgresql,mailpit".into());
         let settings = Settings::load();
         // Services that aren't installed (e.g. no PostgreSQL) are skipped.
         let ids: Vec<&'static str> = SERVICES
@@ -759,6 +906,38 @@ mod tests {
                         assert!(ok, "Adminer could not log in to {service} as {user:?}:\n{}", &page[..page.len().min(3000)]);
                     }
                 }
+            }
+        }
+
+        // mail() from the PHP CLI (same php.ini as Apache's) lands in Mailpit.
+        if ids.contains(&"mailpit")
+            && let Some(php) = selected("php", &settings)
+        {
+            let subject = format!("Stackyard test {}", std::process::id());
+            let sent = Command::new(php.dir.join("php.exe"))
+                .args(["-r", &format!("var_dump(mail('dev@example.com', '{subject}', 'Hello'));")])
+                .output()
+                .unwrap();
+            println!("mail(): {}", String::from_utf8_lossy(&sent.stdout).trim());
+            let mut conn = std::net::TcpStream::connect(("127.0.0.1", settings.ports.mailpit)).unwrap();
+            conn.write_all(b"GET /api/v1/messages?limit=5 HTTP/1.0\r\nHost: localhost\r\n\r\n").unwrap();
+            let mut reply = String::new();
+            conn.read_to_string(&mut reply).unwrap();
+            assert!(reply.contains(&subject), "the message is not in Mailpit:\n{reply}");
+            println!("Mailpit: received {subject:?}");
+        }
+
+        // Backups of the running databases (MySQL may have nothing but its system databases).
+        for id in ["mysql", "postgresql"].into_iter().filter(|id| ids.contains(id)) {
+            match services.backup(id) {
+                Ok(file) => {
+                    let size = std::fs::metadata(&file).unwrap().len();
+                    println!("backup {id}: {} ({size} bytes)", file.display());
+                    assert!(size > 0);
+                    std::fs::remove_file(file).unwrap();
+                }
+                Err(e) if e.contains("nothing to back up") => println!("backup {id}: {e}"),
+                Err(e) => panic!("backup of {id} failed: {e}"),
             }
         }
 

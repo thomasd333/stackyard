@@ -51,6 +51,11 @@ pub fn data_dir() -> PathBuf {
     app_root().join("data")
 }
 
+/// Database backups made from the UI.
+pub fn backups_dir() -> PathBuf {
+    app_root().join("backup").join("databases")
+}
+
 /// PHP and MySQL read paths from their config files in the ANSI code page, so a root with non-ASCII
 /// characters (e.g. "D:\Mój serwer") breaks extension loading and MySQL startup. Spaces are fine.
 pub fn root_is_supported() -> bool {

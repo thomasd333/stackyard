@@ -39,6 +39,26 @@ pub struct ToolInfo {
     version_text: Option<String>,
     in_path: bool,
     path_dirs: Vec<String>,
+    /// Databases: the data folder of each version (same order as `versions`), so the UI can warn
+    /// that switching to another one shows a different, maybe empty, set of databases.
+    data: Vec<VersionData>,
+}
+
+#[derive(Serialize)]
+pub struct VersionData {
+    /// Relative to the Stackyard folder, e.g. `data\mysql-8.4`.
+    dir: String,
+    exists: bool,
+}
+
+/// php.ini choices for the selected PHP.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhpInfo {
+    extensions: Vec<confgen::PhpExtension>,
+    xdebug: bool,
+    /// The Xdebug DLL in the selected PHP's `ext\`, if any.
+    xdebug_file: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -64,6 +84,8 @@ pub struct AppState {
     main_url: String,
     ui: UiInfo,
     ports: settings::Ports,
+    /// None when PHP is not installed.
+    php: Option<PhpInfo>,
     /// Where Adminer is served when it is installed (bin\adminer); it needs Apache running.
     adminer_url: Option<String>,
     startup: StartupInfo,
@@ -166,6 +188,14 @@ fn build_state(cache: &VersionCache) -> CmdResult<AppState> {
         .map(|(t, versions, install)| ToolInfo {
             id: t.id,
             name: t.name,
+            data: versions
+                .iter()
+                .filter_map(|label| services::datadir(t.id, label))
+                .map(|dir| VersionData {
+                    exists: services::has_data(t.id, &dir),
+                    dir: dir.strip_prefix(paths::app_root()).unwrap_or(&dir).to_string_lossy().into_owned(),
+                })
+                .collect(),
             versions,
             in_path: user_path.contains_under(&t.tool_dir(&bin)),
             path_dirs: install
@@ -208,11 +238,13 @@ fn build_state(cache: &VersionCache) -> CmdResult<AppState> {
             .collect(),
         site_suggestions: sites::suggestions(),
         main_url: sites::url(None, settings.ports.apache),
-        ports: settings::Ports {
-            apache: settings.ports.apache,
-            mysql: settings.ports.mysql,
-            postgresql: settings.ports.postgresql,
-        },
+        ports: settings.ports,
+        php: services::selected("php", &settings).map(|php| PhpInfo {
+            extensions: confgen::php_extensions(&php.dir, &settings.php.extensions),
+            xdebug: settings.php.xdebug,
+            xdebug_file: confgen::xdebug_dll(&php.dir)
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())),
+        }),
         adminer_url: confgen::adminer_file().map(|_| adminer_url(settings.ports.apache)),
         startup: StartupInfo {
             with_windows: settings.startup.with_windows,
@@ -239,7 +271,7 @@ fn apply_path(user_path: &mut UserPath, tool: &ToolDef, enable: bool, settings: 
             .ok_or_else(|| format!("{} is not installed", tool.name))?;
         if tool.id == "php" {
             confgen::ensure_layout()?;
-            confgen::write_php(&install.dir)?;
+            confgen::write_php(&install.dir, settings)?;
         }
         user_path.prepend(&tool.path_dirs_for(&install.dir));
     }
@@ -301,9 +333,97 @@ pub fn set_tool_version(
     match tool.id {
         "apache" | "php" => services.restart("apache"),
         "mysql" => services.restart("mysql"),
+        "postgresql" => services.restart("postgresql"),
+        "mailpit" => services.restart("mailpit"),
         _ => {}
     }
     build_state(&cache)
+}
+
+/// Rewrites php.ini after a php.ini choice changed (`before` -> `after`) and restarts a running
+/// Apache. A change that makes PHP report new startup errors (e.g. an extension whose DLLs are missing)
+/// is undone with `undo`, and the errors are returned.
+fn apply_php(before: &Settings, after: &Settings, undo: impl FnOnce(&mut Settings), services: &Arc<Services>) -> CmdResult<()> {
+    let Some(php) = services::selected("php", after) else { return Ok(()) };
+    confgen::ensure_layout()?;
+    confgen::write_php(&php.dir, after)?;
+    if let Some(errors) = confgen::php_startup_errors(&php.dir) {
+        // Errors that were there before (e.g. from conf.d) are not this change's fault.
+        confgen::write_php(&php.dir, before)?;
+        let old = confgen::php_startup_errors(&php.dir).unwrap_or_default();
+        let new: Vec<&str> = errors.lines().filter(|l| !old.lines().any(|o| o == *l)).collect();
+        if !new.is_empty() {
+            Settings::update(undo).map_err(save_error)?;
+            applog::warn(format!("php: change undone, PHP reported: {}", new.join(" | ")));
+            return Err(format!("PHP reports a problem with this change, so it was undone:\n{}", new.join("\n")));
+        }
+        confgen::write_php(&php.dir, after)?;
+    }
+    services.restart("apache");
+    Ok(())
+}
+
+/// Switches a PHP extension on or off (for every PHP version that has it).
+#[tauri::command]
+pub fn set_php_extension(
+    name: String,
+    enabled: bool,
+    cache: State<VersionCache>,
+    services: State<Arc<Services>>,
+) -> CmdResult<AppState> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(format!("Unknown extension: {name}"));
+    }
+    // A choice equal to the default is forgotten, so a later change of the defaults applies.
+    let set = |s: &mut Settings, value: Option<bool>| match value {
+        Some(on) if on != confgen::default_extension(&name) => {
+            s.php.extensions.insert(name.clone(), on);
+        }
+        _ => {
+            s.php.extensions.remove(&name);
+        }
+    };
+    let before = Settings::load();
+    let previous = before.php.extensions.get(&name).copied();
+    let after = Settings::update(|s| set(s, Some(enabled))).map_err(save_error)?;
+    apply_php(&before, &after, |s| set(s, previous), &services)?;
+    applog::info(format!("php: extension {name} {}", if enabled { "on" } else { "off" }));
+    build_state(&cache)
+}
+
+#[tauri::command]
+pub fn set_xdebug(enabled: bool, cache: State<VersionCache>, services: State<Arc<Services>>) -> CmdResult<AppState> {
+    switch_xdebug(enabled, &services)?;
+    build_state(&cache)
+}
+
+fn switch_xdebug(enabled: bool, services: &Arc<Services>) -> CmdResult<()> {
+    let before = Settings::load();
+    let after = Settings::update(|s| s.php.xdebug = enabled).map_err(save_error)?;
+    apply_php(&before, &after, |s| s.php.xdebug = !enabled, services)?;
+    applog::info(format!("php: Xdebug {}", if enabled { "on" } else { "off" }));
+    Ok(())
+}
+
+/// Downloads Xdebug for the selected PHP and switches it on (network, runs off the main thread).
+#[tauri::command]
+pub async fn install_xdebug(cache: State<'_, VersionCache>, services: State<'_, Arc<Services>>) -> CmdResult<AppState> {
+    let php = services::selected("php", &Settings::load()).ok_or("PHP is not installed.")?;
+    let file = tauri::async_runtime::spawn_blocking(move || downloads::install_xdebug(&php.dir))
+        .await
+        .map_err(|e| e.to_string())??;
+    applog::info(format!("php: installed {file}"));
+    switch_xdebug(true, &services)?;
+    build_state(&cache)
+}
+
+/// Backs up the databases of a running MySQL or PostgreSQL; returns the file it wrote.
+#[tauri::command]
+pub async fn backup_database(id: String, services: State<'_, Arc<Services>>) -> CmdResult<String> {
+    let id = service_id(&id)?;
+    let services = Arc::clone(&services);
+    let file = tauri::async_runtime::spawn_blocking(move || services.backup(id)).await.map_err(|e| e.to_string())??;
+    Ok(file.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -376,6 +496,12 @@ pub fn open_location(target: String) -> CmdResult<()> {
         "www" => paths::www_dir().into(),
         "logs" => paths::logs_dir().into(),
         "config" => paths::config_dir().into(),
+        "backups" => {
+            let dir = paths::backups_dir();
+            std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+            dir.into()
+        }
+        "mailpit" => format!("http://127.0.0.1:{}/", Settings::load().ports.mailpit).into(),
         "site" => sites::url(None, Settings::load().ports.apache).into(),
         "adminer" => adminer_url(Settings::load().ports.apache).into(),
         "support" => SUPPORT_URL.into(),
@@ -435,21 +561,27 @@ pub fn set_ports(
     apache: u16,
     mysql: u16,
     postgresql: u16,
+    mailpit: u16,
+    smtp: u16,
     cache: State<VersionCache>,
     services: State<Arc<Services>>,
 ) -> CmdResult<AppState> {
-    if apache == 0 || mysql == 0 || postgresql == 0 {
+    let new = settings::Ports { apache, mysql, postgresql, mailpit, smtp };
+    let all = [apache, mysql, postgresql, mailpit, smtp];
+    if all.contains(&0) {
         return Err("Ports must be between 1 and 65535.".into());
     }
-    if apache == mysql || apache == postgresql || mysql == postgresql {
-        return Err("Apache, MySQL and PostgreSQL need different ports.".into());
+    if all.iter().enumerate().any(|(i, p)| all[..i].contains(p)) {
+        return Err("Every service needs its own port.".into());
     }
     let mut old = settings::Ports::default();
-    Settings::update(|s| old = std::mem::replace(&mut s.ports, settings::Ports { apache, mysql, postgresql }))
-        .map_err(save_error)?;
-    applog::info(format!("Ports set to Apache {apache}, MySQL {mysql}, PostgreSQL {postgresql}"));
-    // Apache also restarts for a database port: Adminer's defaults are written when it starts.
-    if (old.apache, old.mysql, old.postgresql) != (apache, mysql, postgresql) {
+    Settings::update(|s| old = std::mem::replace(&mut s.ports, new)).map_err(save_error)?;
+    applog::info(format!(
+        "Ports set to Apache {apache}, MySQL {mysql}, PostgreSQL {postgresql}, Mailpit {mailpit}, SMTP {smtp}"
+    ));
+    // Apache also restarts for the other ports: Adminer's defaults and php.ini's SMTP port are written
+    // when it starts.
+    if old != new {
         services.restart("apache");
     }
     if old.mysql != mysql {
@@ -457,6 +589,15 @@ pub fn set_ports(
     }
     if old.postgresql != postgresql {
         services.restart("postgresql");
+    }
+    if (old.mailpit, old.smtp) != (mailpit, smtp) {
+        services.restart("mailpit");
+    }
+    // php.exe on PATH reads the same php.ini (SMTP port).
+    if old.smtp != smtp
+        && let Some(php) = services::selected("php", &Settings::load())
+    {
+        confgen::write_php(&php.dir, &Settings::load())?;
     }
     build_state(&cache)
 }

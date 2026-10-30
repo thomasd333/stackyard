@@ -28,6 +28,10 @@ use crate::{applog, confgen, paths, tools};
 const PHP_RELEASES: &str = "https://downloads.php.net/~windows/releases/";
 const NODE_DIST: &str = "https://nodejs.org/dist/";
 const COMPOSER_SITE: &str = "https://getcomposer.org";
+const MAILPIT_LATEST_API: &str = "https://api.github.com/repos/axllent/mailpit/releases/latest";
+/// Lists every Xdebug build with its SHA-256 (there is no machine-readable index).
+const XDEBUG_DOWNLOAD_PAGE: &str = "https://xdebug.org/download";
+const XDEBUG_FILES: &str = "https://xdebug.org/files/";
 
 /// Stackyard's newest release; "latest" skips drafts and pre-releases.
 const APP_LATEST_API: &str = "https://api.github.com/repos/thomasd333/stackyard/releases/latest";
@@ -137,6 +141,7 @@ impl Downloads {
             ("PHP", fetch_php as fn() -> DlResult<Vec<Release>>),
             ("Node.js", fetch_node),
             ("Composer", fetch_composer),
+            ("Mailpit", fetch_mailpit),
         ] {
             match fetch() {
                 Ok(r) => releases.extend(r),
@@ -153,7 +158,7 @@ impl Downloads {
     /// Offers from the last check against what is installed now; None before the first check.
     pub fn updates(&self) -> Option<Updates> {
         let (releases, errors) = self.checked.lock().unwrap().clone()?;
-        let offers = ["php", "nodejs", "composer"]
+        let offers = ["php", "nodejs", "composer", "mailpit"]
             .into_iter()
             .map(|tool| {
                 let mine: Vec<Release> = releases.iter().filter(|r| r.tool == tool).cloned().collect();
@@ -360,6 +365,74 @@ fn fetch_composer() -> DlResult<Vec<Release>> {
         });
     }
     Ok(releases)
+}
+
+/// Mailpit's newest release; GitHub publishes each asset's SHA-256 as its `digest`.
+fn fetch_mailpit() -> DlResult<Vec<Release>> {
+    let json = parse_json(&fetch_text(MAILPIT_LATEST_API)?)?;
+    let tag = json["tag_name"].as_str().ok_or("unexpected GitHub response")?;
+    let asset = json["assets"]
+        .as_array()
+        .and_then(|a| a.iter().find(|x| x["name"] == "mailpit-windows-amd64.zip"))
+        .ok_or("no Windows x64 build in the newest release")?;
+    let version = tag.trim_start_matches('v').to_string();
+    Ok(vec![Release {
+        tool: "mailpit",
+        target: format!("mailpit-{version}"),
+        version,
+        url: asset["browser_download_url"].as_str().ok_or("unexpected GitHub response")?.to_string(),
+        sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_lowercase),
+        size: asset["size"].as_u64(),
+        lts: false,
+    }])
+}
+
+/// The newest stable Xdebug for a PHP major.minor ("8.3"), thread safe or not, from xdebug.org's
+/// download page: (file name, SHA-256). Each link reads
+/// `title="SHA256:&nbsp;<hash>" href='/files/php_xdebug-3.5.3-8.3-ts-vs16-x86_64.dll'`.
+fn find_xdebug(page: &str, php: &str, thread_safe: bool) -> Option<(String, String)> {
+    let build = if thread_safe { "-ts-" } else { "-nts-" };
+    let builds = page.split("SHA256:&nbsp;").skip(1).filter_map(|chunk| {
+        let hash = chunk.get(..64).filter(|h| is_sha256(h))?.to_lowercase();
+        let file = chunk.split("/files/").nth(1)?.split(['\'', '"']).next()?;
+        let rest = file.strip_prefix("php_xdebug-")?.strip_suffix("-x86_64.dll")?;
+        let (version, build_part) = rest.split_once(&format!("-{php}{build}"))?;
+        // Stable only (no "3.6.0alpha1"), and the PHP version must match exactly ("8.3", not "8.30").
+        let stable = version.chars().all(|c| c.is_ascii_digit() || c == '.');
+        (stable && build_part.starts_with("vs")).then(|| (version.to_string(), file.to_string(), hash))
+    });
+    builds.max_by(|a, b| tools::natural_cmp(&a.0, &b.0)).map(|(_, file, hash)| (file, hash))
+}
+
+/// Downloads the newest stable Xdebug for this PHP into its `ext\` (a single DLL of a few hundred KB,
+/// checked against the SHA-256 on xdebug.org). Returns the file name.
+pub fn install_xdebug(php_dir: &Path) -> DlResult<String> {
+    let label = php_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let php = version_in(&label).map(|v| series("php", &v)).ok_or_else(|| format!("Cannot tell the PHP version of {label}."))?;
+    let thread_safe = php_dir.join("php8ts.dll").is_file() || php_dir.join("php7ts.dll").is_file();
+    let page = fetch_text(XDEBUG_DOWNLOAD_PAGE)?;
+    let (file, expected) =
+        find_xdebug(&page, &php, thread_safe).ok_or_else(|| format!("xdebug.org has no stable Xdebug for PHP {php} yet."))?;
+
+    let work = paths::tmp_dir().join("downloads-xdebug");
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).map_err(|e| format!("Cannot create {}: {e}", work.display()))?;
+    let result = (|| {
+        let tmp = work.join(&file);
+        applog::info(format!("php: downloading {file} for {label}"));
+        download(&format!("{XDEBUG_FILES}{file}"), &tmp, |_| {})?;
+        let actual = sha256(&tmp)?;
+        if actual != expected {
+            return Err(format!(
+                "The downloaded file is damaged or was changed (SHA-256 mismatch). Nothing was installed. Try again.\nExpected {expected}\nGot      {actual}"
+            ));
+        }
+        // Copied, not moved: bin\ may be on another drive (a junction) than tmp\.
+        let target = php_dir.join("ext").join(&file);
+        fs::copy(&tmp, &target).map(|_| ()).map_err(|e| format!("Cannot copy {file} to {}: {e}", target.display()))
+    })();
+    let _ = fs::remove_dir_all(&work);
+    result.map(|()| file)
 }
 
 /// Version of Stackyard's newest GitHub release, from its tag ("v1.0.2" -> "1.0.2").
@@ -845,6 +918,39 @@ mod tests {
     }
 
     #[test]
+    fn xdebug_build_for_php() {
+        let link = |hash: char, file: &str| format!("<li><a title=\"SHA256:&nbsp;{}\" href='/files/{file}'>x</a></li>\n", hash.to_string().repeat(64));
+        let page = [
+            link('a', "php_xdebug-3.6.0alpha1-8.3-ts-vs16-x86_64.dll"),
+            link('b', "php_xdebug-3.5.3-8.3-nts-vs16-x86_64.dll"),
+            link('c', "php_xdebug-3.5.3-8.3-ts-vs16-x86_64.dll"),
+            link('d', "php_xdebug-3.5.3-8.5-ts-vs17-x86_64.dll"),
+            link('e', "php_xdebug-3.5.10-8.3-ts-vs16-x86_64.dll"),
+            link('f', "php_xdebug-3.5.3-8.3-ts-vs16-x86.dll"),
+        ]
+        .concat();
+        let found = find_xdebug(&page, "8.3", true).unwrap();
+        assert_eq!(found, ("php_xdebug-3.5.10-8.3-ts-vs16-x86_64.dll".to_string(), "e".repeat(64)));
+        assert_eq!(find_xdebug(&page, "8.3", false).unwrap().1, "b".repeat(64));
+        assert_eq!(find_xdebug(&page, "8.5", true).unwrap().0, "php_xdebug-3.5.3-8.5-ts-vs17-x86_64.dll");
+        assert!(find_xdebug(&page, "8.4", true).is_none());
+    }
+
+    /// Downloads Xdebug into a fake PHP 8.5 TS folder (network, ~1 MB):
+    /// `cargo test xdebug_real -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn xdebug_real() {
+        let php = std::env::temp_dir().join(format!("stackyard-xdebug-{}/php-8.5.12-1-Win32-vs17-x64", std::process::id()));
+        fs::create_dir_all(php.join("ext")).unwrap();
+        fs::write(php.join("php8ts.dll"), "").unwrap();
+        let file = install_xdebug(&php).unwrap();
+        println!("{file} {} bytes", fs::metadata(php.join("ext").join(&file)).unwrap().len());
+        assert!(confgen::xdebug_dll(&php).is_some());
+        fs::remove_dir_all(php.parent().unwrap()).unwrap();
+    }
+
+    #[test]
     fn checksums_and_sizes() {
         let sums = "aaa  node-v22.1.0-win-x86.zip\nBBB  node-v22.1.0-win-x64.zip\n";
         assert_eq!(sha_for(sums, "node-v22.1.0-win-x64.zip").as_deref(), Some("bbb"));
@@ -930,9 +1036,14 @@ mod tests {
     #[test]
     #[ignore]
     fn check_real() {
-        for (name, fetch) in [("php", fetch_php as fn() -> DlResult<Vec<Release>>), ("nodejs", fetch_node), ("composer", fetch_composer)] {
+        for (name, fetch) in [
+            ("php", fetch_php as fn() -> DlResult<Vec<Release>>),
+            ("nodejs", fetch_node),
+            ("composer", fetch_composer),
+            ("mailpit", fetch_mailpit),
+        ] {
             for r in fetch().unwrap() {
-                println!("{name:<9} {:<10} lts={:<5} {} {:?}", r.version, r.lts, r.url, r.size);
+                println!("{name:<9} {:<10} lts={:<5} {} {:?} {:?}", r.version, r.lts, r.url, r.size, r.sha256);
             }
         }
     }

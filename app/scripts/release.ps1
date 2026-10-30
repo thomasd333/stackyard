@@ -82,7 +82,7 @@ Copy-Item "$app\src-tauri\templates\index.php" "$out\www\index.php"
 # Same detection exes as TOOLS in src-tauri/src/tools.rs.
 $tools = [ordered]@{
     apache = 'bin\httpd.exe'; php = 'php.exe'; mysql = 'bin\mysqld.exe'; postgresql = 'bin\postgres.exe'
-    nodejs = 'node.exe'; composer = 'composer.phar'; git = 'cmd\git.exe'; python = 'python.exe'
+    mailpit = 'mailpit.exe'; nodejs = 'node.exe'; composer = 'composer.phar'; git = 'cmd\git.exe'; python = 'python.exe'
 }
 
 # Written on this machine, never shipped. Stackyard regenerates its own configs on start.
@@ -116,6 +116,7 @@ Put tools here, one folder per tool, optionally with version subfolders:
   bin\apache\httpd-2.4.x-Win64-VS18\     (Apache Lounge build)
   bin\php\php-8.x.x-Win32-vs17-x64\      (Thread Safe build, needed by Apache)
   bin\mysql\mysql-8.x.x-winx64\
+  bin\mailpit\mailpit-1.x.x\             (mailpit-windows-amd64.zip)
   bin\nodejs\node-v22.x.x-win-x64\
   bin\composer\composer.phar
   bin\git\                               (PortableGit)

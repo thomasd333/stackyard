@@ -112,7 +112,7 @@ fn timestamp() -> String {
 }
 
 /// "20261027-071203", safe for file names and sortable.
-fn file_stamp() -> String {
+pub(crate) fn file_stamp() -> String {
     let t = local_time();
     format!("{:04}{:02}{:02}-{:02}{:02}{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond)
 }

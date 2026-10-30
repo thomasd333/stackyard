@@ -3,11 +3,16 @@
 //! Configs are regenerated on every start with absolute paths of the current root, so the whole
 //! folder can be moved. User overrides live in `config/<service>/conf.d/`, which is never overwritten.
 
+use std::collections::BTreeMap;
 use std::fs;
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use serde::Serialize;
 
 use crate::paths::{self, fwd};
-use crate::settings::{Ports, Site};
+use crate::settings::{self, Ports, Settings};
 use crate::sites;
 
 const HTTPD_CONF: &str = include_str!("../templates/httpd.conf");
@@ -32,6 +37,18 @@ const PHP_EXTENSIONS: &[&str] = &[
 /// Microsoft SQL Server drivers; their DLLs carry the PHP version and build in the name,
 /// e.g. `php_pdo_sqlsrv_83_ts_x64.dll`.
 const PHP_SQLSRV_EXTENSIONS: &[&str] = &["sqlsrv", "pdo_sqlsrv"];
+
+/// PHP's own test modules, never offered.
+const PHP_HIDDEN_EXTENSIONS: &[&str] = &["dl_test", "zend_test"];
+
+/// One extension of a PHP install, as listed in the UI.
+#[derive(Serialize)]
+pub struct PhpExtension {
+    pub name: String,
+    pub enabled: bool,
+    /// Whether Stackyard loads it when the user hasn't chosen.
+    pub default: bool,
+}
 
 type GenResult<T> = Result<T, String>;
 
@@ -243,7 +260,8 @@ fn write_adminer(ports: &Ports, has_php: bool) -> GenResult<String> {
     ))
 }
 
-pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, ports: &Ports, sites: &[Site]) -> GenResult<PathBuf> {
+/// `ports` may differ from `settings.ports` (Apache's port is the one checked free by the caller).
+pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, ports: &Ports, settings: &Settings) -> GenResult<PathBuf> {
     let port = ports.apache;
     let modules_dir = apache_dir.join("modules");
     let preloads = php_dir.map(|dir| php_preloads(dir, apache_dir)).unwrap_or_default();
@@ -264,7 +282,7 @@ pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, ports: &Ports, si
             let (dll, module) = php_apache_module(dir).ok_or_else(|| {
                 format!("{} has no php*apache2_4.dll - Apache needs a Thread Safe (TS) PHP build", dir.display())
             })?;
-            let ini = write_php(dir)?;
+            let ini = write_php(dir, settings)?;
             format!(
                 "LoadModule {module} \"{}\"\nPHPIniDir \"{}\"\n<FilesMatch \"\\.php$\">\n    SetHandler application/x-httpd-php\n</FilesMatch>",
                 fwd(&dll),
@@ -280,7 +298,7 @@ pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, ports: &Ports, si
             ("PORT", port.to_string()),
             ("MODULES", modules.join("\n")),
             ("PHP", php),
-            ("SITES", sites::apache_vhosts(sites, port)),
+            ("SITES", sites::apache_vhosts(&settings.sites, port)),
             ("ADMINER", write_adminer(ports, php_dir.is_some())?),
         ],
     );
@@ -289,9 +307,9 @@ pub fn write_apache(apache_dir: &Path, php_dir: Option<&Path>, ports: &Ports, si
     Ok(path)
 }
 
-/// File names of the SQL Server driver DLLs built for this PHP (same major.minor, x64, TS or NTS),
-/// e.g. `php_pdo_sqlsrv_83_ts_x64.dll` for `bin\php\php-8.3.33-Win32-vs16-x64`.
-pub(crate) fn sqlsrv_extensions(php_dir: &Path) -> Vec<String> {
+/// The SQL Server drivers built for this PHP (same major.minor, x64, TS or NTS) as (name, DLL file),
+/// e.g. ("pdo_sqlsrv", "php_pdo_sqlsrv_83_ts_x64.dll") for `bin\php\php-8.3.33-Win32-vs16-x64`.
+pub(crate) fn sqlsrv_extensions(php_dir: &Path) -> Vec<(&'static str, String)> {
     let label = php_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let Some(version) = major_minor(&label) else { return Vec::new() };
     let thread_safe = fs::read_dir(php_dir).into_iter().flatten().flatten().any(|e| {
@@ -303,9 +321,110 @@ pub(crate) fn sqlsrv_extensions(php_dir: &Path) -> Vec<String> {
 
     PHP_SQLSRV_EXTENSIONS
         .iter()
-        .map(|base| format!("php_{base}_{version}_{build}_x64.dll"))
-        .filter(|dll| ext_dir.join(dll).is_file())
+        .map(|base| (*base, format!("php_{base}_{version}_{build}_x64.dll")))
+        .filter(|(_, dll)| ext_dir.join(dll).is_file())
         .collect()
+}
+
+/// Extensions this PHP has (`ext\php_<name>.dll`, the SQL Server drivers built for it), sorted by name,
+/// each on or off as chosen in `chosen`, else by default. Xdebug has its own switch.
+pub fn php_extensions(php_dir: &Path, chosen: &BTreeMap<String, bool>) -> Vec<PhpExtension> {
+    let mut names: Vec<String> = fs::read_dir(php_dir.join("ext"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let file = e.file_name().to_string_lossy().to_lowercase();
+            let name = file.strip_prefix("php_")?.strip_suffix(".dll")?.to_string();
+            let skip = name.contains("sqlsrv") || name.starts_with("xdebug") || PHP_HIDDEN_EXTENSIONS.contains(&name.as_str());
+            (!skip).then_some(name)
+        })
+        .chain(sqlsrv_extensions(php_dir).into_iter().map(|(name, _)| name.to_string()))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .map(|name| {
+            let default = default_extension(&name);
+            PhpExtension { enabled: chosen.get(&name).copied().unwrap_or(default), default, name }
+        })
+        .collect()
+}
+
+/// Loaded unless switched off: the common set, the SQL Server drivers and OPcache.
+pub fn default_extension(name: &str) -> bool {
+    name == "opcache" || PHP_EXTENSIONS.contains(&name) || PHP_SQLSRV_EXTENSIONS.contains(&name)
+}
+
+/// Xdebug in this PHP's `ext\` (`php_xdebug.dll`, or xdebug.org's `php_xdebug-3.5.3-8.3-ts-vs16-x86_64.dll`);
+/// the newest when there are several.
+pub fn xdebug_dll(php_dir: &Path) -> Option<PathBuf> {
+    let mut found: Vec<PathBuf> = fs::read_dir(php_dir.join("ext"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            name.starts_with("php_xdebug") && name.ends_with(".dll")
+        })
+        .collect();
+    found.sort_by(|a, b| crate::tools::natural_cmp(&b.to_string_lossy(), &a.to_string_lossy()));
+    found.into_iter().next()
+}
+
+/// The `extension` / `zend_extension` lines for php.ini.
+fn extension_lines(php_dir: &Path, php: &settings::Php) -> Vec<String> {
+    let sqlsrv = sqlsrv_extensions(php_dir);
+    let mut lines = Vec::new();
+    let mut zend = Vec::new();
+    for ext in php_extensions(php_dir, &php.extensions).into_iter().filter(|e| e.enabled) {
+        match sqlsrv.iter().find(|(name, _)| *name == ext.name) {
+            Some((_, dll)) => lines.push(format!("extension = {dll}")),
+            None if ext.name == "opcache" => zend.push("zend_extension = opcache".to_string()),
+            None => lines.push(format!("extension = {}", ext.name)),
+        }
+    }
+    // After OPcache, as Xdebug's documentation asks.
+    if php.xdebug
+        && let Some(dll) = xdebug_dll(php_dir)
+    {
+        zend.push(format!("zend_extension = \"{}\"", fwd(&dll)));
+    }
+    lines.extend(zend);
+    lines
+}
+
+/// Xdebug settings: step debugging only when asked for (XDEBUG_SESSION cookie, query parameter or
+/// environment variable, e.g. from a browser extension), so pages without it stay fast.
+const XDEBUG_INI: &str = "[xdebug]
+xdebug.mode = debug
+xdebug.start_with_request = trigger
+xdebug.client_host = 127.0.0.1
+xdebug.client_port = 9003
+; No \"could not connect to the debugging client\" warnings when no IDE listens.
+xdebug.log_level = 0";
+
+/// PHP startup warnings, e.g. an extension that can't be loaded (a missing DLL it needs), from running
+/// the CLI with the php.ini just written. None when PHP starts cleanly.
+pub fn php_startup_errors(php_dir: &Path) -> Option<String> {
+    let out = Command::new(php_dir.join("php.exe"))
+        .arg("-v")
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    // With display_startup_errors the CLI prints each warning twice (stderr and stdout).
+    let mut lines: Vec<String> = Vec::new();
+    for line in String::from_utf8_lossy(&out.stderr).lines().chain(String::from_utf8_lossy(&out.stdout).lines()) {
+        // "PHP Warning:  PHP Startup: ..." on stderr, "Warning: PHP Startup: ..." on stdout.
+        let words = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        let line = words.strip_prefix("PHP ").unwrap_or(&words).to_string();
+        if line.contains("Startup:") && !lines.contains(&line) {
+            lines.push(line);
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 /// "php-8.3.33-Win32-vs16-x64" -> "83"
@@ -317,19 +436,17 @@ fn major_minor(label: &str) -> Option<String> {
 
 /// Writes php.ini to `config/php/` (used by Apache) and into the PHP folder itself, so the CLI
 /// from PATH uses the same settings. The PHP folder's original php.ini is kept as php.ini.orig.
-pub fn write_php(php_dir: &Path) -> GenResult<PathBuf> {
-    let ext_dir = php_dir.join("ext");
-    let mut extensions: Vec<String> = PHP_EXTENSIONS
-        .iter()
-        .filter(|e| ext_dir.join(format!("php_{e}.dll")).is_file())
-        .map(|e| format!("extension = {e}"))
-        .collect();
-    extensions.extend(sqlsrv_extensions(php_dir).into_iter().map(|dll| format!("extension = {dll}")));
-    if ext_dir.join("php_opcache.dll").is_file() {
-        extensions.push("zend_extension = opcache".into());
-    }
-
-    let mut ini = fill(PHP_INI, &[("PHP_DIR", fwd(php_dir)), ("EXTENSIONS", extensions.join("\n"))]);
+pub fn write_php(php_dir: &Path, settings: &Settings) -> GenResult<PathBuf> {
+    let xdebug = settings.php.xdebug && xdebug_dll(php_dir).is_some();
+    let mut ini = fill(
+        PHP_INI,
+        &[
+            ("PHP_DIR", fwd(php_dir)),
+            ("EXTENSIONS", extension_lines(php_dir, &settings.php).join("\n")),
+            ("SMTP_PORT", settings.ports.smtp.to_string()),
+            ("XDEBUG", if xdebug { XDEBUG_INI.into() } else { String::new() }),
+        ],
+    );
 
     // PHP has no include directive, so user overrides are appended (later values win).
     let conf_d = paths::config_dir().join("php/conf.d");
@@ -406,6 +523,82 @@ mod tests {
         // Any 64-bit exe works; our own test binary imports kernel32.
         let exe = std::env::current_exe().unwrap();
         assert!(pe_imports(&exe).iter().any(|n| n.eq_ignore_ascii_case("kernel32.dll")));
+    }
+
+    #[test]
+    fn php_extensions_follow_defaults_and_choices() {
+        let php = std::env::temp_dir().join(format!("stackyard-ext-{}/php-8.3.36-Win32-vs16-x64", std::process::id()));
+        fs::create_dir_all(php.join("ext")).unwrap();
+        fs::write(php.join("php8ts.dll"), "").unwrap();
+        for dll in [
+            "php_intl.dll", "php_ffi.dll", "php_opcache.dll", "php_zend_test.dll", "php_sqlsrv_83_ts_x64.dll",
+            "php_sqlsrv_83_nts_x64.dll", "php_pdo_sqlsrv_84_ts_x64.dll", "php_xdebug-3.5.3-8.3-ts-vs16-x86_64.dll",
+        ] {
+            fs::write(php.join("ext").join(dll), "").unwrap();
+        }
+        let mut chosen = BTreeMap::from([("intl".to_string(), false), ("ffi".to_string(), true)]);
+        let list: Vec<(String, bool, bool)> =
+            php_extensions(&php, &chosen).into_iter().map(|e| (e.name, e.enabled, e.default)).collect();
+        // No test module, no Xdebug, only the SQL Server driver built for this PHP (8.3 TS).
+        assert_eq!(
+            list,
+            [("ffi".into(), true, false), ("intl".into(), false, true), ("opcache".into(), true, true), ("sqlsrv".into(), true, true)]
+        );
+
+        let mut php_settings = settings::Php { extensions: chosen.clone(), xdebug: false };
+        assert_eq!(extension_lines(&php, &php_settings), ["extension = ffi", "extension = php_sqlsrv_83_ts_x64.dll", "zend_extension = opcache"]);
+        php_settings.xdebug = true;
+        chosen.insert("opcache".into(), false);
+        php_settings.extensions = chosen;
+        let lines = extension_lines(&php, &php_settings);
+        assert!(lines.last().unwrap().starts_with("zend_extension = \"") && lines.last().unwrap().contains("php_xdebug-3.5.3"));
+        assert!(!lines.iter().any(|l| l.contains("opcache")));
+        fs::remove_dir_all(php.parent().unwrap()).unwrap();
+    }
+
+    /// A copy of the newest real PHP in a temporary root: the default set starts cleanly, and an extension
+    /// whose DLLs are missing (pdo_firebird needs fbclient.dll) is reported. Downloads Xdebug (network)
+    /// and checks that it loads.
+    /// `cargo test php_startup_real -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn php_startup_real() {
+        fn copy_dir(from: &Path, to: &Path) {
+            fs::create_dir_all(to).unwrap();
+            for e in fs::read_dir(from).unwrap().flatten() {
+                let target = to.join(e.file_name());
+                if e.path().is_dir() { copy_dir(&e.path(), &target) } else { fs::copy(e.path(), target).unwrap(); }
+            }
+        }
+        let real = crate::tools::find("php").unwrap().installs(&paths::bin_dir()).remove(0);
+        let root = std::env::temp_dir().join(format!("stackyard-php-{}", std::process::id()));
+        let php = root.join("bin/php").join(&real.label);
+        copy_dir(&real.dir, &php);
+        // SAFETY: ignored test, run on its own.
+        unsafe { std::env::set_var("STACKYARD_ROOT", &root) };
+        ensure_layout().unwrap();
+
+        let mut settings = Settings::default();
+        write_php(&php, &settings).unwrap();
+        assert_eq!(php_startup_errors(&php), None, "the default set should load cleanly");
+        settings.php.extensions.insert("pdo_firebird".into(), true);
+        write_php(&php, &settings).unwrap();
+        let errors = php_startup_errors(&php);
+        println!("{} with pdo_firebird: {errors:?}", real.label);
+        assert!(errors.is_some_and(|e| e.contains("pdo_firebird") && e.lines().count() == 1));
+
+        // Xdebug from xdebug.org (network), switched on.
+        settings.php.extensions.clear();
+        settings.php.xdebug = true;
+        crate::downloads::install_xdebug(&php).unwrap();
+        write_php(&php, &settings).unwrap();
+        assert_eq!(php_startup_errors(&php), None);
+        let out = Command::new(php.join("php.exe")).arg("-v").output().unwrap();
+        let version = String::from_utf8_lossy(&out.stdout);
+        println!("{}", version.trim());
+        assert!(version.contains("with Xdebug"));
+        unsafe { std::env::remove_var("STACKYARD_ROOT") };
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

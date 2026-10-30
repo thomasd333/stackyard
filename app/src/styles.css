@@ -649,3 +649,90 @@ button.primary {
 .option .hint {
   margin: 2px 0 0 42px;
 }
+
+/* Tools > PHP: Xdebug (a switch, or a download button) and the extension checkboxes. */
+.option .form-row {
+  align-items: center;
+}
+
+.option .form-row + .hint {
+  margin-left: 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* "Configure" next to a tool's name. */
+button.small {
+  font-size: 11px;
+  padding: 1px 8px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+/* Modal dialog (PHP configuration). */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgb(0 0 0 / 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px;
+}
+
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
+  padding: 16px 20px;
+  width: min(760px, 100%);
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.dialog-head .link {
+  font-size: 16px;
+}
+
+.dialog-sub {
+  margin-top: 16px;
+}
+
+/* Version and counts next to a heading keep their own case. */
+.dialog h2 .count {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: normal;
+}
+
+.ext-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 4px 12px;
+  margin-top: 10px;
+}
+
+.ext {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Differs from the default. */
+.ext .changed {
+  font-weight: 700;
+}

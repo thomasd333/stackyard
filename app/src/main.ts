@@ -10,6 +10,15 @@ interface ToolInfo {
   versionText: string | null;
   inPath: boolean;
   pathDirs: string[];
+  /** Databases: the data folder of each version (same order as `versions`). */
+  data: { dir: string; exists: boolean }[];
+}
+
+interface PhpInfo {
+  extensions: { name: string; enabled: boolean; default: boolean }[];
+  xdebug: boolean;
+  /** The Xdebug DLL in the selected PHP's ext folder, if downloaded. */
+  xdebugFile: string | null;
 }
 
 interface PathEntry {
@@ -45,7 +54,9 @@ interface AppState {
   /** Address of the default host (localhost -> www). */
   mainUrl: string;
   ui: UiInfo;
-  ports: { apache: number; mysql: number; postgresql: number };
+  ports: { apache: number; mysql: number; postgresql: number; mailpit: number; smtp: number };
+  /** Null when PHP is not installed. */
+  php: PhpInfo | null;
   /** Set when Adminer is installed (bin\adminer); it is served by Apache. */
   adminerUrl: string | null;
   startup: { withWindows: boolean; restoreServices: boolean; checkAppUpdates: boolean };
@@ -119,6 +130,10 @@ let checking = false;
 let appUpdate: AppUpdate | null = null;
 let checkingApp = false;
 let job: Job | null = null;
+/** Databases being backed up (the backup runs in the backend; the button waits for it). */
+const backingUp = new Set<string>();
+let installingXdebug = false;
+let phpDialogOpen = false;
 /** Offer picked in each tool's download list, kept across re-renders. */
 const chosenOffer: Record<string, string> = {};
 /** "Add site" form; `rootEdited` stops the folder from following the name once typed by hand. */
@@ -291,6 +306,35 @@ async function checkAppUpdate() {
   }
 }
 
+async function backupDatabase(id: string) {
+  if (backingUp.has(id)) return;
+  backingUp.add(id);
+  render();
+  try {
+    const file = await invoke<string>("backup_database", { id });
+    notice = { kind: "info", text: t("backupDone", { file }) };
+  } catch (e) {
+    notice = { kind: "error", text: String(e) };
+  } finally {
+    backingUp.delete(id);
+    render();
+  }
+}
+
+async function installXdebug() {
+  if (installingXdebug) return;
+  installingXdebug = true;
+  render();
+  try {
+    adopt(await invoke<AppState>("install_xdebug"));
+  } catch (e) {
+    notice = { kind: "error", text: String(e) };
+  } finally {
+    installingXdebug = false;
+    render();
+  }
+}
+
 async function startDownload(tool: string) {
   const version = chosenOffer[tool] ?? updates?.offers[tool]?.[0]?.version;
   if (!version) return;
@@ -406,7 +450,20 @@ function serviceRow(svc: ServiceInfo): string {
   const message =
     svc.message && (svc.status === "error" || svc.status === "starting")
       ? `<pre class="svc-message ${svc.status}">${esc(svc.message)}</pre>`
-      : "";
+      : !svc.version && svc.id === "mailpit"
+        ? `<p class="hint">${esc(t("mailpitMissing"))}</p>`
+        : "";
+  const backing = backingUp.has(svc.id);
+  const extra =
+    running && (svc.id === "mysql" || svc.id === "postgresql")
+      ? `<button data-backup="${svc.id}" ${tip(t("backupHint"))} ${backing ? "disabled" : ""}>${esc(
+          t(backing ? "backingUp" : "backup"),
+        )}</button>`
+      : running && svc.id === "mailpit"
+        ? `<button data-open="mailpit" ${tip(t("openInboxHint", { port: state?.ports.smtp ?? "" }))}>${esc(
+            t("openInbox"),
+          )}</button>`
+        : "";
 
   return `
     <li class="service">
@@ -417,6 +474,7 @@ function serviceRow(svc: ServiceInfo): string {
           <span class="tool-detail">${detail}</span>
         </div>
         <span class="svc-status ${svc.status}">${esc(t(statusLabel[svc.status]))}</span>
+        ${extra}
         <button class="${running ? "" : "primary"}" data-svc="${svc.id}" data-svc-action="${running ? "stop" : "start"}"
           ${transitioning || !svc.version ? "disabled" : ""}>${esc(t(running ? "stop" : "start"))}</button>
       </div>
@@ -433,10 +491,15 @@ function toolRow(tool: ToolInfo): string {
     ? esc(tool.versionText ?? t("versionUnknown"))
     : esc(t("installHint", { id: tool.id }));
 
+  const configure =
+    tool.id === "php" && state?.php
+      ? ` <button class="small" data-action="php_config" ${tip(t("configureHint"))}>${esc(t("configure"))}</button>`
+      : "";
+
   return `
     <li class="tool ${installed ? "" : "missing"}">
       <div class="tool-main">
-        <span class="tool-name">${esc(tool.name)}</span>
+        <span class="tool-name">${esc(tool.name)}${configure}</span>
         <span class="tool-detail" title="${esc(tool.pathDirs.join("\n"))}">${detail}</span>
       </div>
       ${
@@ -599,6 +662,7 @@ function settingsTab(s: AppState, dis: string): string {
       ["www", t("openWww"), "\\www"],
       ["logs", t("openLogs"), "\\logs"],
       ["config", t("openConfig"), "\\config"],
+      ["backups", t("openBackups"), "\\backup\\databases"],
     ] as const
   )
     .map(
@@ -644,6 +708,14 @@ function settingsTab(s: AppState, dis: string): string {
         <label class="field">
           <span>${esc(t("portPostgresql"))}</span>
           <input type="number" class="port" name="postgresql" min="1" max="65535" value="${s.ports.postgresql}" required ${dis} />
+        </label>
+        <label class="field">
+          <span>${esc(t("portMailpit"))}</span>
+          <input type="number" class="port" name="mailpit" min="1" max="65535" value="${s.ports.mailpit}" required ${dis} />
+        </label>
+        <label class="field">
+          <span>${esc(t("portSmtp"))}</span>
+          <input type="number" class="port" name="smtp" min="1" max="65535" value="${s.ports.smtp}" required ${dis} />
         </label>
         <button type="submit" ${dis}>${esc(t("save"))}</button>
       </form>
@@ -693,9 +765,57 @@ function servicesTab(s: AppState, dis: string): string {
     ${terminalSection(s.terminal, dis)}`;
 }
 
+/** The PHP configuration dialog (Xdebug and the extensions of the selected PHP), opened from the PHP row. */
+function phpDialog(php: PhpInfo, label: string, dis: string): string {
+  const on = php.extensions.filter((e) => e.enabled).length;
+  const extensions = php.extensions
+    .map(
+      (e) => `
+        <label class="ext" ${tip(t(e.default ? "extDefaultOn" : "extDefaultOff"))}>
+          <input type="checkbox" data-ext="${esc(e.name)}" ${e.enabled ? "checked" : ""} ${dis} />
+          <span class="${e.enabled === e.default ? "" : "changed"}">${esc(e.name)}</span>
+        </label>`,
+    )
+    .join("");
+  const xdebug = php.xdebugFile
+    ? `<label class="switch" ${tip(php.xdebugFile)}>
+         <input type="checkbox" data-xdebug="1" ${php.xdebug ? "checked" : ""} ${dis} />
+         <span class="slider"></span>
+         <span class="switch-label">Xdebug</span>
+       </label>`
+    : `<div class="form-row">
+         <span class="tool-name">Xdebug</span>
+         <span class="muted">${esc(t("xdebugMissing"))}</span>
+         <button data-action="install_xdebug" ${tip(t("downloadXdebugHint"))} ${installingXdebug || busy ? "disabled" : ""}>${esc(
+           t(installingXdebug ? "downloadingXdebug" : "downloadXdebug"),
+         )}</button>
+       </div>`;
+  return `
+    <div class="backdrop" data-action="close_dialog">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+        <div class="dialog-head">
+          <h2 id="dialog-title">${esc(t("php"))} <span class="count">${esc(label)}</span></h2>
+          <button class="link" data-action="close_dialog" ${tip(t("close"))}>✕</button>
+        </div>
+        ${noticeHtml()}
+        <div class="options">
+          <div class="option">
+            ${xdebug}
+            <p class="hint">${esc(t("xdebugHint"))}</p>
+          </div>
+        </div>
+        <div class="section-head dialog-sub">
+          <h2>${esc(t("extensions"))} <span class="count">${esc(t("extensionsCount", { on, all: php.extensions.length }))}</span></h2>
+        </div>
+        <div class="ext-grid">${extensions}</div>
+        <p class="hint">${esc(t("extensionsHint"))}</p>
+      </div>
+    </div>`;
+}
+
 function toolsTab(s: AppState, dis: string): string {
   // Keep the User PATH panel open across re-renders.
-  const pathOpen = app.querySelector("details")?.open ? "open" : "";
+  const pathOpen = app.querySelector<HTMLDetailsElement>("details.user-path")?.open ? "open" : "";
   const apacheRunning = services.some((x) => x.id === "apache" && x.status === "running");
   const adminer = s.adminerUrl
     ? `<button data-open="adminer" ${tip(t(apacheRunning ? "adminerHint" : "startApacheFirst"))}
@@ -717,7 +837,7 @@ function toolsTab(s: AppState, dis: string): string {
     </section>
 
     <section>
-      <details ${pathOpen}>
+      <details class="user-path" ${pathOpen}>
         <summary><h2>${esc(t("userPath"))}</h2> <span class="count">${s.userPath.length}</span></summary>
         <p class="hint">${esc(t("userPathHint"))}</p>
         <ul class="path-list">${s.userPath.map(pathRow).join("")}</ul>
@@ -743,6 +863,9 @@ function render() {
   }
   applyUi(state.ui);
   const dis = busy ? "disabled" : "";
+  // The PHP dialog closes by itself when PHP goes away (e.g. after Refresh).
+  phpDialogOpen &&= !!state.php;
+  const dialogOpen = phpDialogOpen;
   const apacheRunning = services.some((s) => s.id === "apache" && s.status === "running");
   // Re-rendering replaces the inputs; put the cursor back where it was.
   const focused = document.activeElement as HTMLInputElement | null;
@@ -782,14 +905,10 @@ function render() {
 
     ${state.rootSupported ? "" : `<div class="notice error"><span>${esc(t("rootUnsupported"))}</span></div>`}
 
-    ${
-      notice
-        ? `<div class="notice ${notice.kind}"><span>${esc(notice.text)}</span>
-             <button class="link" data-action="dismiss">${esc(t("dismiss"))}</button></div>`
-        : ""
-    }
+    ${dialogOpen ? "" : noticeHtml()}
 
-    ${body}`;
+    ${body}
+    ${dialogOpen ? phpDialog(state.php!, state.tools.find((x) => x.id === "php")?.selected ?? "", dis) : ""}`;
 
   if (focus) {
     const el = document.getElementById(focus.id) as HTMLInputElement | null;
@@ -798,6 +917,14 @@ function render() {
       if (focus.start !== null) el.setSelectionRange(focus.start, focus.end);
     }
   }
+}
+
+/** The message bar; inside the PHP dialog while it is open, so an undone change is seen there. */
+function noticeHtml(): string {
+  return notice
+    ? `<div class="notice ${notice.kind}"><span>${esc(notice.text)}</span>
+         <button class="link" data-action="dismiss">${esc(t("dismiss"))}</button></div>`
+    : "";
 }
 
 /** Adds the site from the form; the form is cleared only when it worked. */
@@ -833,6 +960,10 @@ app.addEventListener("click", (ev) => {
   if (svc) {
     return serviceCmd(svc.dataset.svcAction === "stop" ? "stop_service" : "start_service", { id: svc.dataset.svc });
   }
+  const backup = target.closest<HTMLElement>("[data-backup]")?.dataset.backup;
+  if (backup) {
+    return backupDatabase(backup);
+  }
   const download = target.closest<HTMLElement>("[data-download]")?.dataset.download;
   if (download) {
     return startDownload(download);
@@ -865,6 +996,17 @@ app.addEventListener("click", (ev) => {
       return checkUpdates();
     case "check_app":
       return checkAppUpdate();
+    case "install_xdebug":
+      return installXdebug();
+    case "php_config":
+      phpDialogOpen = true;
+      notice = null;
+      return render();
+    case "close_dialog":
+      // Only the backdrop itself or the close button, not clicks inside the dialog.
+      if (target.closest(".dialog") && !target.closest("button")) return;
+      phpDialogOpen = false;
+      return render();
     case "dismiss_job":
       return dismissJob();
     case "quit":
@@ -909,7 +1051,13 @@ app.addEventListener("submit", (ev) => {
   if (form.dataset.form === "site") addSite();
   if (form.dataset.form === "ports") {
     const value = (name: string) => Number((form.elements.namedItem(name) as HTMLInputElement).value);
-    run("set_ports", { apache: value("apache"), mysql: value("mysql"), postgresql: value("postgresql") });
+    run("set_ports", {
+      apache: value("apache"),
+      mysql: value("mysql"),
+      postgresql: value("postgresql"),
+      mailpit: value("mailpit"),
+      smtp: value("smtp"),
+    });
   }
 });
 
@@ -947,9 +1095,29 @@ app.addEventListener("change", (ev) => {
     setTerminal({ windowsTerminal: (el as HTMLInputElement).checked });
   } else if (el.dataset.path) {
     run("set_tool_in_path", { id: el.dataset.path, enabled: (el as HTMLInputElement).checked }, true);
+  } else if (el.dataset.ext) {
+    run("set_php_extension", { name: el.dataset.ext, enabled: (el as HTMLInputElement).checked });
+  } else if (el.dataset.xdebug) {
+    run("set_xdebug", { enabled: (el as HTMLInputElement).checked });
   } else if (el.dataset.version) {
     const tool = state?.tools.find((x) => x.id === el.dataset.version);
-    run("set_tool_version", { id: el.dataset.version, version: el.value }, tool?.inPath ?? false);
+    // Databases: another version may use another (still empty) data folder; say where the data is.
+    const dataOf = (version: string | null | undefined) => tool?.data[tool.versions.indexOf(version ?? "")];
+    const [from, to] = [dataOf(tool?.selected), dataOf(el.value)];
+    const version = el.value;
+    run("set_tool_version", { id: el.dataset.version, version }, tool?.inPath ?? false).then((ok) => {
+      if (ok && from?.exists && to && !to.exists && from.dir !== to.dir) {
+        notice = { kind: "info", text: t("newDataDir", { version, dir: to.dir, old: from.dir }) };
+        render();
+      }
+    });
+  }
+});
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && phpDialogOpen) {
+    phpDialogOpen = false;
+    render();
   }
 });
 

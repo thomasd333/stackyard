@@ -22,6 +22,7 @@ pub const TOOLS: &[ToolDef] = &[
     ToolDef { id: "php", name: "PHP", exe: "php.exe", path_dirs: &[""], version_args: Some(&["-v"]) },
     ToolDef { id: "mysql", name: "MySQL", exe: "bin/mysqld.exe", path_dirs: &["bin"], version_args: Some(&["--version"]) },
     ToolDef { id: "postgresql", name: "PostgreSQL", exe: "bin/postgres.exe", path_dirs: &["bin"], version_args: Some(&["--version"]) },
+    ToolDef { id: "mailpit", name: "Mailpit", exe: "mailpit.exe", path_dirs: &[""], version_args: Some(&["version"]) },
     ToolDef { id: "nodejs", name: "Node.js", exe: "node.exe", path_dirs: &[""], version_args: Some(&["-v"]) },
     ToolDef { id: "composer", name: "Composer", exe: "composer.phar", path_dirs: &[""], version_args: None },
     ToolDef { id: "git", name: "Git", exe: "cmd/git.exe", path_dirs: &["cmd"], version_args: Some(&["--version"]) },

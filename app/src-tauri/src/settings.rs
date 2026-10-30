@@ -20,6 +20,8 @@ pub struct Settings {
     pub ui: Ui,
     #[serde(default)]
     pub startup: Startup,
+    #[serde(default)]
+    pub php: Php,
     /// Services the user left running (started and not stopped by hand); restored at launch when
     /// `startup.restore_services` is on. Quitting Stackyard does not clear it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -32,18 +34,34 @@ pub struct Settings {
     pub root: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ports {
     pub apache: u16,
     pub mysql: u16,
     pub postgresql: u16,
+    /// Mailpit's web interface.
+    pub mailpit: u16,
+    /// Mailpit's SMTP server, where PHP's mail() sends to.
+    pub smtp: u16,
 }
 
 impl Default for Ports {
     fn default() -> Self {
-        Self { apache: 80, mysql: 3306, postgresql: 5432 }
+        Self { apache: 80, mysql: 3306, postgresql: 5432, mailpit: 8025, smtp: 1025 }
     }
+}
+
+/// php.ini choices made in the UI (on top of the template; `config\php\conf.d\` still wins).
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Php {
+    /// Extensions switched on or off by hand ("intl" -> false); the others follow `confgen`'s defaults.
+    /// Names have no version or build, so the choice carries over to other PHP versions.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub extensions: BTreeMap<String, bool>,
+    /// Load Xdebug when the selected PHP has it (`ext\php_xdebug*.dll`).
+    pub xdebug: bool,
 }
 
 /// "Open terminal" choice. `shell` is a plain string, not an enum, so an unknown value can't make the

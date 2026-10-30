@@ -4,7 +4,7 @@
 
 <p align="center">
   A free, portable local web development stack for Windows.<br>
-  Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git and Python in one folder, with a small app to run them.
+  Apache, PHP, MySQL, PostgreSQL, Mailpit, Node.js, Composer, Git and Python in one folder, with a small app to run them.
 </p>
 
 <p align="center">
@@ -13,7 +13,12 @@
   <a href="https://ko-fi.com/thomasd333">Chip in a coffee</a>
 </p>
 
-<p align="center"><img src="site/screenshots/services.png" width="720" alt="Stackyard: services tab"></p>
+<p align="center">
+  <picture>
+    <source srcset="site/screenshots/services-dark.png" media="(prefers-color-scheme: dark)">
+    <img src="site/screenshots/services.png" width="720" alt="Stackyard: services tab">
+  </picture>
+</p>
 
 ## Why
 
@@ -24,13 +29,19 @@ to another drive or copy it to a USB stick.
 
 ## Features
 
-- **Services:** start and stop Apache, MySQL and PostgreSQL, one by one or all at once. Port
+- **Services:** start and stop Apache, MySQL, PostgreSQL and Mailpit, one by one or all at once. Port
   conflicts are detected and named (for example "port 80 is used by Laragon"). Crashed services are
   noticed and their log tail is shown.
+- **Mail catcher:** PHP's `mail()` (or your app's SMTP settings, `127.0.0.1:1025`) delivers to
+  [Mailpit](https://mailpit.axllent.org/), which keeps every message in a web inbox instead of sending it.
+- **Xdebug and PHP extensions:** switch Xdebug on (downloaded from xdebug.org for your PHP version)
+  and turn extensions on or off with checkboxes. A change PHP can't load is undone.
+- **Database backups:** one click dumps MySQL or PostgreSQL to a `.sql` file. Switching to a database
+  version that keeps its data elsewhere tells you where your databases are.
 - **Versions side by side:** keep several versions of PHP, Node.js and the others and switch from a
   list. A running service restarts on the new version.
-- **Updates in the app:** check for and download new PHP, Node.js and Composer versions, verified
-  with SHA-256.
+- **Updates in the app:** check for and download new PHP, Node.js, Composer and Mailpit versions,
+  verified with SHA-256.
 - **PATH management:** add the selected tools to your Windows user PATH with one switch (a backup is
   kept before every change), or open a terminal (cmd, PowerShell, Git Bash, Windows Terminal) with
   every tool already on PATH.
@@ -45,6 +56,7 @@ to another drive or copy it to a USB stick.
 
 <p align="center">
   <img src="site/screenshots/tools.png" width="420" alt="Tools and PATH tab">
+  <img src="site/screenshots/php.png" width="420" alt="PHP configuration: Xdebug and extensions">
   <img src="site/screenshots/sites.png" width="420" alt="Virtual hosts tab">
 </p>
 
@@ -56,6 +68,7 @@ to another drive or copy it to a USB stick.
 | PHP (Thread Safe x64) | 8.3 |
 | MySQL Community Server | 8.4 LTS |
 | PostgreSQL | 18 |
+| Mailpit | 1.32 |
 | Node.js | 26 |
 | Composer | 2 |
 | Git for Windows (portable) | 2.56 |

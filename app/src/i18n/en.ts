@@ -49,10 +49,10 @@ export const en = {
   customHint: "The program is started in www and inherits the PATH. Windows Terminal does not apply.",
   checkUpdates: "Check for updates",
   checking: "Checking…",
-  checkUpdatesHint: "Look for new PHP, Node.js and Composer versions on their official sites",
+  checkUpdatesHint: "Look for new PHP, Node.js, Composer and Mailpit versions on their official sites",
   checkFailed: "Some sources could not be checked:\n{errors}",
   updatesFound: "Updates available: {count}. See the Tools tab.",
-  upToDate: "PHP, Node.js and Composer are up to date. Other versions can still be downloaded from the Tools list.",
+  upToDate: "PHP, Node.js, Composer and Mailpit are up to date. Other versions can still be downloaded from the Tools list.",
   updateAvailable: "Update available",
   dlOther: "Other versions",
   dlUpdates: "update from {version}",
@@ -139,6 +139,35 @@ export const en = {
     "config\\settings.json could not be read ({error}). It was kept as settings.json.broken and the last good settings were restored.",
   quit: "Quit",
   quitHint: "Stop all services and exit",
+  backup: "Back up",
+  backingUp: "Backing up…",
+  backupHint:
+    "Save the databases to a .sql file in backup\\databases. MySQL: every database except the system ones; PostgreSQL: everything, with its roles.",
+  backupDone: "Backup saved: {file}",
+  openBackups: "Backups",
+  openInbox: "Open inbox",
+  openInboxHint: "Mailpit's inbox in the browser: everything PHP's mail() sends, or an app sends to SMTP 127.0.0.1:{port}",
+  mailpitMissing: "Not installed: Tools & PATH > Check for updates offers Mailpit for download.",
+  php: "PHP",
+  xdebugHint:
+    "Step debugging on request: your IDE listens on port 9003 and a request with the XDEBUG_SESSION cookie (a browser extension sets it) or ?XDEBUG_SESSION=1 starts a session. Requests without it stay fast. Applies to Apache and to php on PATH.",
+  xdebugMissing: "not downloaded for this PHP",
+  downloadXdebug: "Download Xdebug",
+  downloadXdebugHint: "Download the matching build from xdebug.org (about 400 KB) into this PHP's ext folder and switch it on",
+  downloadingXdebug: "Downloading Xdebug…",
+  extensions: "Extensions",
+  extensionsCount: "{on} of {all} on",
+  extensionsHint:
+    "Choices apply to every PHP version that has the extension. php.ini is rewritten for Apache and for php on PATH, and a running Apache restarts. A change PHP cannot load (e.g. a missing DLL it needs) is undone. Files in config\\php\\conf.d still have the last word.",
+  extDefaultOn: "On by default",
+  extDefaultOff: "Off by default",
+  portMailpit: "Mailpit (inbox)",
+  portSmtp: "Mailpit (SMTP)",
+  newDataDir:
+    "{version} keeps its databases in its own folder, {dir}, which has none yet. Your databases are in {old}: switch back to see them, or back them up first and load the .sql file into the new version (e.g. with Adminer's Import).",
+  configure: "Configure",
+  configureHint: "Xdebug and PHP extensions",
+  close: "Close",
 };
 
 export type Messages = typeof en;

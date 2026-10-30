@@ -26,6 +26,10 @@ PostgreSQL (EnterpriseDB binaries)
            commandlinetools_3rd_party_licenses.txt
   Source:  https://www.postgresql.org/ftp/source/
 
+Mailpit
+  License: MIT License - bin\mailpit\<version>\LICENSE
+  Source:  https://github.com/axllent/mailpit
+
 Node.js
   License: MIT License and the licenses of its bundled parts - bin\nodejs\<version>\LICENSE
   Source:  https://nodejs.org/dist/

@@ -7,7 +7,7 @@
 <meta name="description" content="Free, portable Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git and Python for Windows, with a small app to run them. A light alternative to Laragon and XAMPP.">
 <meta property="og:title" content="Stackyard: portable local web stack for Windows">
 <meta property="og:description" content="Unzip, run, Start all. Apache, PHP, MySQL, PostgreSQL and more in one folder. Free and open source.">
-<meta property="og:image" content="https://lifeart.com.pl/stackyard/screenshots/services.png">
+<meta property="og:image" content="https://lifeart.com.pl/stackyard/screenshots/services.png?v=1.1.0">
 <meta property="og:url" content="https://lifeart.com.pl/stackyard/">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -118,6 +118,29 @@
   footer p { margin: 6px 0; }
   .coffee { font-size: 15px; }
 
+  /* Screenshot lightbox */
+  .shot img, .gallery img { cursor: zoom-in; }
+  dialog.lightbox { padding: 0; border: none; background: transparent; max-width: 96vw; max-height: 94vh; overflow: visible; }
+  dialog.lightbox::backdrop { background: rgba(10, 14, 22, 0.82); }
+  dialog.lightbox img { display: block; max-width: 96vw; max-height: 88vh; width: auto; height: auto; border-radius: 8px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); cursor: zoom-out; }
+  dialog.lightbox p { margin: 10px 0 0; text-align: center; color: #e6e9ef; font-size: 14px; }
+  dialog.lightbox button { position: fixed; top: 14px; right: 18px; width: 40px; height: 40px; padding: 0; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.14); color: #fff; cursor: pointer; display: grid; place-items: center; }
+  dialog.lightbox button:hover { background: rgba(255, 255, 255, 0.26); }
+  dialog.lightbox button svg { display: block; }
+  dialog.lightbox:focus { outline: none; }
+  dialog.lightbox button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  /* Opens with a short fade, the image zooming in; closing plays it backwards (.closing, see the script).
+     Only the image is scaled: a transform on the dialog would move the fixed close button with it. */
+  dialog.lightbox[open], dialog.lightbox[open]::backdrop { animation: lb-fade 240ms ease-out; }
+  dialog.lightbox[open] img { animation: lb-zoom 240ms ease-out; }
+  dialog.lightbox.closing, dialog.lightbox.closing::backdrop { animation: lb-fade 200ms ease-in reverse forwards; }
+  dialog.lightbox.closing img { animation: lb-zoom 200ms ease-in reverse forwards; }
+  @keyframes lb-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes lb-zoom { from { transform: scale(0.94); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    dialog.lightbox, dialog.lightbox::backdrop, dialog.lightbox img { animation: none !important; }
+  }
+
   @media (max-width: 600px) {
     nav a.hide-sm { display: none; }
     .hero { padding-top: 40px; padding-bottom: 24px; }
@@ -142,8 +165,8 @@
 <main>
   <div class="hero wrap">
     <h1>Your local web stack,<br>in one portable folder</h1>
-    <p class="lead">Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git and Python for Windows, with a small
-      app to run them. Unzip, run, <b>Start all</b>. Free and open source.</p>
+    <p class="lead">Apache, PHP, MySQL, PostgreSQL, Mailpit, Node.js, Composer, Git and Python for Windows, with a
+      small app to run them. Unzip, run, <b>Start all</b>. Free and open source.</p>
     <div class="buttons">
       <a class="btn primary" href="https://github.com/thomasd333/stackyard/releases/latest">Download for Windows</a>
       <a class="btn" href="https://github.com/thomasd333/stackyard">View on GitHub</a>
@@ -151,8 +174,8 @@
     <p class="meta">Windows 10/11 x64 · zip, no installer · MIT License</p>
     <div class="shot">
       <picture>
-        <source srcset="screenshots/services-dark.png" media="(prefers-color-scheme: dark)">
-        <img src="screenshots/services.png" width="920" height="470" alt="Stackyard window with Apache and MySQL running">
+        <source srcset="screenshots/services-dark.png?v=1.1.0" media="(prefers-color-scheme: dark)">
+        <img src="screenshots/services.png?v=1.1.0" width="920" height="520" alt="Stackyard window with Apache, MySQL and Mailpit running">
       </picture>
     </div>
   </div>
@@ -164,11 +187,17 @@
         no installer: everything, settings and databases included, stays in the folder you unzipped.</p>
       <div class="grid">
         <div class="card"><h3>Start and stop with one click</h3>
-          <p>Apache, MySQL and PostgreSQL, one by one or all at once. Port conflicts are named, crashes are noticed and the log is shown.</p></div>
+          <p>Apache, MySQL, PostgreSQL and Mailpit, one by one or all at once. Port conflicts are named, crashes are noticed and the log is shown.</p></div>
+        <div class="card"><h3>Mail that never leaves your PC</h3>
+          <p>PHP's <code>mail()</code> and your app's SMTP settings deliver to Mailpit, which keeps every message in a web inbox.</p></div>
+        <div class="card"><h3>Xdebug and extensions</h3>
+          <p>Switch Xdebug on (the right build is downloaded for you) and PHP extensions on or off. A change PHP can't load is undone.</p></div>
+        <div class="card"><h3>Database backups</h3>
+          <p>One click dumps MySQL or PostgreSQL to a <code>.sql</code> file, and a version switch tells you where your data is.</p></div>
         <div class="card"><h3>Versions side by side</h3>
           <p>Keep PHP 8.3 and 8.5, or two Node.js versions, and switch from a list. Running services restart by themselves.</p></div>
         <div class="card"><h3>Updates built in</h3>
-          <p>Check for and download new PHP, Node.js and Composer releases, verified with SHA-256.</p></div>
+          <p>Check for and download new PHP, Node.js, Composer and Mailpit releases, verified with SHA-256.</p></div>
         <div class="card"><h3>PATH without the pain</h3>
           <p>Put the selected tools on your user PATH with a switch (with backups), or open a terminal that already has them.</p></div>
         <div class="card"><h3>Virtual hosts in two clicks</h3>
@@ -188,8 +217,9 @@
   <section>
     <div class="wrap">
       <div class="gallery">
-        <figure><a href="screenshots/tools.png"><img src="screenshots/tools.png" width="920" height="680" loading="lazy" alt="Tools and PATH tab"></a><figcaption>Tools, versions and PATH</figcaption></figure>
-        <figure><a href="screenshots/sites.png"><img src="screenshots/sites.png" width="920" height="460" loading="lazy" alt="Virtual hosts tab"></a><figcaption>Virtual hosts on *.localhost</figcaption></figure>
+        <figure><a href="screenshots/tools.png?v=1.1.0"><img src="screenshots/tools.png?v=1.1.0" width="920" height="736" loading="lazy" alt="Tools and PATH tab"></a><figcaption>Tools, versions and PATH</figcaption></figure>
+        <figure><a href="screenshots/php.png?v=1.1.0"><img src="screenshots/php.png?v=1.1.0" width="920" height="600" loading="lazy" alt="PHP configuration with Xdebug and extensions"></a><figcaption>Xdebug and PHP extensions</figcaption></figure>
+        <figure><a href="screenshots/sites.png?v=1.1.0"><img src="screenshots/sites.png?v=1.1.0" width="920" height="460" loading="lazy" alt="Virtual hosts tab"></a><figcaption>Virtual hosts on *.localhost</figcaption></figure>
       </div>
     </div>
   </section>
@@ -204,6 +234,7 @@
         <tr><td>PHP, Thread Safe x64</td><td>8.3</td></tr>
         <tr><td>MySQL Community Server</td><td>8.4 LTS</td></tr>
         <tr><td>PostgreSQL</td><td>18</td></tr>
+        <tr><td>Mailpit</td><td>1.32</td></tr>
         <tr><td>Node.js</td><td>26</td></tr>
         <tr><td>Composer</td><td>2</td></tr>
         <tr><td>Git for Windows, portable</td><td>2.56</td></tr>
@@ -225,7 +256,7 @@
         <li><b>Start all</b> and open <code>http://localhost/</code>. Your projects go in <code>www\</code>.</li>
       </ol>
       <p class="note">MySQL: user <code>root</code>, no password, port 3306. PostgreSQL: user <code>postgres</code>,
-        no password, port 5432.</p>
+        no password, port 5432. Mail (SMTP): <code>127.0.0.1</code>, port 1025.</p>
     </div>
   </section>
 
@@ -278,6 +309,45 @@
     <p>Built with Claude Code. Not affiliated with or endorsed by Anthropic.</p>
   </div>
 </footer>
+
+<dialog class="lightbox" aria-label="Screenshot" tabindex="-1" autofocus>
+  <button type="button" aria-label="Close"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  <img alt="">
+  <p></p>
+</dialog>
+<script>
+  // Screenshots open full size in a lightbox; without JavaScript the gallery links still open the image.
+  (() => {
+    const box = document.querySelector("dialog.lightbox");
+    if (!box || !box.showModal) return;
+    const img = box.querySelector("img");
+    const caption = box.querySelector("p");
+    document.querySelectorAll(".shot img, .gallery img").forEach((shot) => {
+      shot.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        img.src = shot.currentSrc || shot.src; // the dark variant when the page is dark
+        img.alt = shot.alt;
+        caption.textContent = shot.closest("figure")?.querySelector("figcaption")?.textContent ?? "";
+        box.showModal();
+      });
+    });
+    // Any click closes it (image, button or the dimmed background), as does Esc; after the fade-out.
+    const close = () => {
+      if (!box.open || box.classList.contains("closing")) return;
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      box.classList.add("closing");
+      setTimeout(() => {
+        box.classList.remove("closing");
+        box.close();
+      }, reduced ? 0 : 200);
+    };
+    box.addEventListener("click", close);
+    box.addEventListener("cancel", (ev) => {
+      ev.preventDefault();
+      close();
+    });
+  })();
+</script>
 
 </body>
 </html>
