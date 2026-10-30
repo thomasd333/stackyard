@@ -10,7 +10,7 @@ use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 use crate::applog;
 use crate::autostart;
 use crate::confgen;
-use crate::downloads::{Downloads, Job, Updates};
+use crate::downloads::{self, AppUpdate, Downloads, Job, Updates};
 use crate::env_path::{self, UserPath};
 use crate::i18n;
 use crate::paths;
@@ -78,6 +78,7 @@ pub struct AppState {
 pub struct StartupInfo {
     with_windows: bool,
     restore_services: bool,
+    check_app_updates: bool,
 }
 
 #[derive(Serialize)]
@@ -216,6 +217,7 @@ fn build_state(cache: &VersionCache) -> CmdResult<AppState> {
         startup: StartupInfo {
             with_windows: settings.startup.with_windows,
             restore_services: settings.startup.restore_services,
+            check_app_updates: settings.startup.check_app_updates,
         },
         version: env!("CARGO_PKG_VERSION"),
         settings_recovered: settings::take_recovery(),
@@ -377,6 +379,7 @@ pub fn open_location(target: String) -> CmdResult<()> {
         "site" => sites::url(None, Settings::load().ports.apache).into(),
         "adminer" => adminer_url(Settings::load().ports.apache).into(),
         "support" => SUPPORT_URL.into(),
+        "release" => downloads::APP_RELEASES_PAGE.into(),
         // "site:<name>" opens a virtual host.
         _ => match target.strip_prefix("site:") {
             Some(name) => sites::url(Some(&sites::normalize_name(name)?), Settings::load().ports.apache).into(),
@@ -411,10 +414,18 @@ pub fn set_terminal(
 
 /// Saves the startup options and adds or removes the Windows sign-in entry.
 #[tauri::command]
-pub fn set_startup(with_windows: bool, restore_services: bool, cache: State<VersionCache>) -> CmdResult<AppState> {
+pub fn set_startup(
+    with_windows: bool,
+    restore_services: bool,
+    check_app_updates: bool,
+    cache: State<VersionCache>,
+) -> CmdResult<AppState> {
     autostart::set(with_windows).map_err(|e| format!("Cannot change the Windows startup entry: {e}"))?;
-    Settings::update(|s| s.startup = settings::Startup { with_windows, restore_services }).map_err(save_error)?;
-    applog::info(format!("Startup: with Windows {with_windows}, restore services {restore_services}"));
+    let startup = settings::Startup { with_windows, restore_services, check_app_updates };
+    Settings::update(|s| s.startup = startup).map_err(save_error)?;
+    applog::info(format!(
+        "Startup: with Windows {with_windows}, restore services {restore_services}, check for updates {check_app_updates}"
+    ));
     build_state(&cache)
 }
 
@@ -545,6 +556,19 @@ pub async fn check_updates(downloads: State<'_, Arc<Downloads>>) -> CmdResult<Up
 pub async fn get_updates(downloads: State<'_, Arc<Downloads>>) -> CmdResult<Option<Updates>> {
     let downloads = Arc::clone(&downloads);
     tauri::async_runtime::spawn_blocking(move || downloads.updates()).await.map_err(|e| e.to_string())
+}
+
+/// Checks GitHub for a newer Stackyard (network, runs off the main thread).
+#[tauri::command]
+pub async fn check_app_update(downloads: State<'_, Arc<Downloads>>) -> CmdResult<AppUpdate> {
+    let downloads = Arc::clone(&downloads);
+    tauri::async_runtime::spawn_blocking(move || downloads.check_app()).await.map_err(|e| e.to_string())?
+}
+
+/// The last Stackyard update check's result (no network).
+#[tauri::command]
+pub fn get_app_update(downloads: State<Arc<Downloads>>) -> Option<AppUpdate> {
+    downloads.app_update()
 }
 
 #[tauri::command]

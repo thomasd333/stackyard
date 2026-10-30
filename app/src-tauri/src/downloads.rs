@@ -1,4 +1,5 @@
-//! Downloads new versions of PHP, Node.js and Composer from their official sources.
+//! Downloads new versions of PHP, Node.js and Composer from their official sources, and checks
+//! whether a newer Stackyard is out (only checks: the user downloads it from the releases page).
 //!
 //! A new PHP or Node version is installed next to the existing ones (`bin\<tool>\<version-dir>\`) and
 //! picked with the normal version switch, so going back is one click. Composer is a single file: a flat
@@ -15,7 +16,7 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -27,6 +28,13 @@ use crate::{applog, confgen, paths, tools};
 const PHP_RELEASES: &str = "https://downloads.php.net/~windows/releases/";
 const NODE_DIST: &str = "https://nodejs.org/dist/";
 const COMPOSER_SITE: &str = "https://getcomposer.org";
+
+/// Stackyard's newest release; "latest" skips drafts and pre-releases.
+const APP_LATEST_API: &str = "https://api.github.com/repos/thomasd333/stackyard/releases/latest";
+/// Where an available Stackyard update is downloaded by hand.
+pub const APP_RELEASES_PAGE: &str = "https://github.com/thomasd333/stackyard/releases/latest";
+/// The automatic Stackyard update check (when switched on) runs at most this often.
+const APP_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Node majors whose newest release is older than this (relative to the newest Node release) are
 /// treated as end-of-life and not offered.
@@ -101,11 +109,23 @@ pub struct Job {
     backup: Option<String>,
 }
 
+/// Result of the last Stackyard update check.
+#[derive(Clone, Serialize)]
+pub struct AppUpdate {
+    /// Newest released version, e.g. "1.0.2".
+    latest: String,
+    /// True when it is newer than this Stackyard.
+    newer: bool,
+}
+
 #[derive(Default)]
 pub struct Downloads {
     /// Releases from the last check, with errors of the sources that failed.
     checked: Mutex<Option<(Vec<Release>, Vec<String>)>>,
     job: Mutex<Option<Job>>,
+    app: Mutex<Option<AppUpdate>>,
+    /// When Stackyard's own update was last checked (successfully or not).
+    app_checked: Mutex<Option<Instant>>,
 }
 
 impl Downloads {
@@ -214,6 +234,41 @@ impl Downloads {
         Ok(())
     }
 
+    /// Asks GitHub for the newest Stackyard release (network, a second or two).
+    pub fn check_app(&self) -> DlResult<AppUpdate> {
+        *self.app_checked.lock().unwrap() = Some(Instant::now());
+        let latest = fetch_app_latest().inspect_err(|e| applog::warn(format!("Stackyard update check: {e}")))?;
+        let update = AppUpdate { newer: is_newer(&latest, env!("CARGO_PKG_VERSION")), latest };
+        if update.newer {
+            applog::info(format!("Stackyard {} is available", update.latest));
+        }
+        *self.app.lock().unwrap() = Some(update.clone());
+        Ok(update)
+    }
+
+    /// The last Stackyard update check's result (no network); None before the first one.
+    pub fn app_update(&self) -> Option<AppUpdate> {
+        self.app.lock().unwrap().clone()
+    }
+
+    /// Checks for a Stackyard update once a day while `startup.check_app_updates` is on (the first
+    /// time right away), and passes each result to `notify`.
+    pub fn watch_app_updates(self: &Arc<Self>, notify: impl Fn(&AppUpdate) + Send + 'static) {
+        let me = Arc::clone(self);
+        std::thread::spawn(move || {
+            loop {
+                let due = me.app_checked.lock().unwrap().is_none_or(|t| t.elapsed() >= APP_CHECK_INTERVAL);
+                if due
+                    && Settings::load().startup.check_app_updates
+                    && let Ok(update) = me.check_app()
+                {
+                    notify(&update);
+                }
+                std::thread::sleep(Duration::from_secs(10 * 60));
+            }
+        });
+    }
+
     fn update_job(&self, f: impl FnOnce(&mut Job)) {
         if let Some(job) = self.job.lock().unwrap().as_mut() {
             f(job);
@@ -305,6 +360,18 @@ fn fetch_composer() -> DlResult<Vec<Release>> {
         });
     }
     Ok(releases)
+}
+
+/// Version of Stackyard's newest GitHub release, from its tag ("v1.0.2" -> "1.0.2").
+fn fetch_app_latest() -> DlResult<String> {
+    let json = parse_json(&fetch_text(APP_LATEST_API)?)?;
+    let tag = json["tag_name"].as_str().ok_or("unexpected GitHub response")?;
+    Ok(tag.trim_start_matches('v').to_string())
+}
+
+/// True when release `latest` is newer than `current` ("1.0.10" > "1.0.9").
+fn is_newer(latest: &str, current: &str) -> bool {
+    tools::natural_cmp(latest, current).is_gt()
 }
 
 /// SHA-256 published next to the download.
@@ -757,6 +824,24 @@ mod tests {
         assert_eq!(o.len(), 1);
         assert_eq!(o[0].updates.as_deref(), Some("2.10.2"));
         assert_eq!(offers("composer", &releases, &[]).len(), 2);
+    }
+
+    #[test]
+    fn app_versions_compare_numerically() {
+        assert!(is_newer("1.0.2", "1.0.1"));
+        assert!(is_newer("1.0.10", "1.0.9"));
+        assert!(is_newer("1.1.0", "1.0.99"));
+        assert!(!is_newer("1.0.1", "1.0.1"));
+        assert!(!is_newer("1.0.0", "1.0.1"));
+    }
+
+    /// Asks GitHub for the newest Stackyard release: `cargo test app_check_real -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn app_check_real() {
+        let update = Downloads::default().check_app().unwrap();
+        println!("latest {} (newer than {}: {})", update.latest, env!("CARGO_PKG_VERSION"), update.newer);
+        assert!(update.latest.starts_with(|c: char| c.is_ascii_digit()));
     }
 
     #[test]

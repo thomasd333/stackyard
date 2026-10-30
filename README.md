@@ -68,6 +68,7 @@ versions: unzip them into `bin\<tool>\<version>\` and press **Refresh**.
 ## Quick start
 
 1. Download the zip from [Releases](https://github.com/thomasd333/stackyard/releases/latest).
+   The `-lite` zip is the same without MySQL and PostgreSQL, about half the size.
    Before unzipping: right-click > Properties > **Unblock**.
 2. Unzip to a folder with only English letters in its path, e.g. `D:\Stackyard`. Spaces are fine;
    letters like `ą` or `é` are not, because PHP and MySQL cannot handle them.

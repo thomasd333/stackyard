@@ -73,6 +73,8 @@ pub struct Startup {
     pub with_windows: bool,
     /// Start the services in `Settings::running` when Stackyard launches.
     pub restore_services: bool,
+    /// Check GitHub for a newer Stackyard once a day (off by default: no network unless asked).
+    pub check_app_updates: bool,
 }
 
 /// Appearance. Plain strings like `Terminal::shell`; unknown values mean "system".

@@ -3,12 +3,15 @@
 #   npm run release                  exe + the selected version of every tool in bin\
 #   npm run release -- -AllVersions  every installed version of every tool
 #   npm run release -- -NoBin        exe only, with an empty bin\ and a README
-#   npm run release -- -KeepFolder   keep the unpacked folder next to the zip
+#   npm run release -- -KeepFolder   keep the unpacked folders next to the zips
+#   npm run release -- -NoLite       skip the lite zip
+#
+# Two zips: the full one, and "lite" (the same without MySQL and PostgreSQL, about half the size).
 #
 # Nothing from this machine goes in: no www\, data\, config\, logs\, tmp\ or backup\, and the files in
 # bin\ that Stackyard, Laragon or the tools themselves wrote (php.ini, my.ini, Apache logs, ...).
 # Text files are then scanned for local paths and names; any hit stops the release.
-param([switch]$AllVersions, [switch]$NoBin, [switch]$KeepFolder)
+param([switch]$AllVersions, [switch]$NoBin, [switch]$KeepFolder, [switch]$NoLite)
 
 $ErrorActionPreference = 'Stop'
 $app = Split-Path $PSScriptRoot -Parent
@@ -178,9 +181,12 @@ Put tools here, one folder per tool, optionally with version subfolders:
     }
 }
 
-# CRLF so Notepad on older Windows shows the lines.
-$readme = (Get-Content "$PSScriptRoot\README-release.txt" -Raw).Replace('{{VERSION}}', $version)
-[IO.File]::WriteAllText("$out\README.txt", ($readme -replace "`r?`n", "`r`n"), [Text.Encoding]::ASCII)
+# CRLF so Notepad on older Windows shows the lines. `$edition` is the lite zip's note (README-lite.txt).
+function Write-Readme($dir, $edition) {
+    $readme = (Get-Content "$PSScriptRoot\README-release.txt" -Raw).Replace('{{VERSION}}', $version).Replace('{{EDITION}}', $edition)
+    [IO.File]::WriteAllText("$dir\README.txt", ($readme -replace "`r?`n", "`r`n"), [Text.Encoding]::ASCII)
+}
+Write-Readme $out ''
 foreach ($doc in @{ 'LICENSE.txt' = "$root\LICENSE"; 'THIRD-PARTY.txt' = "$PSScriptRoot\THIRD-PARTY.txt" }.GetEnumerator()) {
     $text = Get-Content $doc.Value -Raw
     [IO.File]::WriteAllText("$out\$($doc.Key)", ($text -replace "`r?`n", "`r`n"), [Text.Encoding]::ASCII)
@@ -216,13 +222,34 @@ foreach ($p in $patterns) {
 Write-Host "  clean"
 
 # --- Zip --------------------------------------------------------------------------------------------
+$created = @()
+function Pack($folderName) {
+    $zipPath = Join-Path $releaseDir "$folderName.zip"
+    # System32 tar (bsdtar) writes zip with -a; much faster than Compress-Archive for ~1 GB of tools.
+    & "$env:SystemRoot\System32\tar.exe" -a -c -f $zipPath -C $releaseDir $folderName
+    if ($LASTEXITCODE -ne 0) { throw "Packing $folderName failed" }
+    $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+    "$hash  $folderName.zip" | Set-Content "$zipPath.sha256" -Encoding ascii
+    $script:created += "$zipPath ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)`n  SHA256 $hash"
+}
+
 Step "Packing"
-# System32 tar (bsdtar) writes zip with -a; much faster than Compress-Archive for ~1 GB of tools.
-& "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $releaseDir $name
-if ($LASTEXITCODE -ne 0) { throw "Packing failed" }
+Pack $name
+
+# Lite: the same folder without the databases, copied before the full folder is removed.
+$hasDatabases = (Test-Path "$out\bin\mysql") -or (Test-Path "$out\bin\postgresql")
+if (-not $NoLite -and $hasDatabases) {
+    Step "Packing the lite zip (no MySQL, no PostgreSQL)"
+    $liteName = "Stackyard-$version-lite-win-x64"
+    $liteOut = Join-Path $releaseDir $liteName
+    foreach ($p in $liteOut, "$liteOut.zip") { if (Test-Path $p) { Remove-Item -Recurse -Force $p } }
+    robocopy $out $liteOut /E /NFL /NDL /NJH /NJS /NP /XD "$out\bin\mysql" "$out\bin\postgresql" | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "Copying the lite folder failed (robocopy $LASTEXITCODE)" }
+    Write-Readme $liteOut (Get-Content "$PSScriptRoot\README-lite.txt" -Raw)
+    Pack $liteName
+    if (-not $KeepFolder) { Remove-Item -Recurse -Force $liteOut }
+}
 if (-not $KeepFolder) { Remove-Item -Recurse -Force $out }
 
-$hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-"$hash  $name.zip" | Set-Content "$zip.sha256" -Encoding ascii
-Write-Host "`nCreated $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)" -ForegroundColor Green
-Write-Host "SHA256 $hash"
+Write-Host ""
+$created | ForEach-Object { Write-Host "Created $_" -ForegroundColor Green }

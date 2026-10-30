@@ -18,7 +18,7 @@ mod tray;
 
 use std::sync::Arc;
 
-use tauri::{Manager, RunEvent, WindowEvent};
+use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -50,6 +50,11 @@ pub fn run() {
             if !autostart::launched_at_sign_in() {
                 tray::show_window(app.handle());
             }
+            // The window shows "update available" next to the version (see main.ts).
+            let handle = app.handle().clone();
+            app.state::<Arc<downloads::Downloads>>().watch_app_updates(move |update| {
+                let _ = handle.emit("app-update", update);
+            });
             if settings.startup.restore_services {
                 let services = app.state::<Arc<services::Services>>();
                 for (id, _) in services::SERVICES.iter().filter(|(id, _)| settings.running.iter().any(|r| r == id)) {
@@ -87,6 +92,8 @@ pub fn run() {
             commands::remove_site,
             commands::check_updates,
             commands::get_updates,
+            commands::check_app_update,
+            commands::get_app_update,
             commands::download_tool,
             commands::get_download,
             commands::dismiss_download,

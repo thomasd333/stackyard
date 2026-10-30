@@ -5,7 +5,7 @@ Apache, PHP, MySQL, PostgreSQL, Node.js, Composer, Git, Python and Adminer (a da
 the browser) in one folder, with a small window (and a tray
 icon) to start/stop services, switch versions, manage the PATH and add local sites. Everything,
 settings included, stays inside this folder. The window is in English, German, Spanish, French,
-Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
+Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).{{EDITION}}
 
 
 1. INSTALL
@@ -59,6 +59,9 @@ Polish, Portuguese or Ukrainian (Settings tab; by default the Windows language).
 -------
 - New tool versions: PHP, Node.js and Composer from Tools & PATH > "Check for updates". Any other
   version: unzip into bin\<tool>\<version-folder>\ and press Refresh (PHP must be Thread Safe x64).
+- New Stackyard versions: Settings > About > "Check for updates" (or switch on the daily check in
+  Settings > Startup). Download the new zip, quit Stackyard and copy the new Stackyard.exe over the
+  old one; your bin\, www\, data\ and config\ stay as they are.
 - Folders: www\ (sites), data\ (databases), config\ (settings and generated configs; put your own
   additions in config\apache|php|mysql\conf.d\), logs\.
 - Problems: send logs\stackyard.log plus the log of the failing service (apache_error.log,

@@ -112,6 +112,12 @@ h1 .version {
   color: var(--muted);
 }
 
+/* "1.0.2 available" next to the version; opens the releases page. */
+header .app-update {
+  border: none;
+  cursor: pointer;
+}
+
 input.port {
   width: 110px;
 }

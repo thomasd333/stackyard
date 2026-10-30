@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { languageNames, setLocale, t } from "./i18n";
 
 interface ToolInfo {
@@ -47,7 +48,7 @@ interface AppState {
   ports: { apache: number; mysql: number; postgresql: number };
   /** Set when Adminer is installed (bin\adminer); it is served by Apache. */
   adminerUrl: string | null;
-  startup: { withWindows: boolean; restoreServices: boolean };
+  startup: { withWindows: boolean; restoreServices: boolean; checkAppUpdates: boolean };
   version: string;
   /** Parse error of a settings.json that was set aside and replaced (sent once). */
   settingsRecovered: string | null;
@@ -71,6 +72,12 @@ interface Offer {
 interface Updates {
   offers: Record<string, Offer[]>;
   errors: string[];
+}
+
+/** The last check for a newer Stackyard (not for the tools). */
+interface AppUpdate {
+  latest: string;
+  newer: boolean;
 }
 
 type JobPhase = "downloading" | "verifying" | "extracting" | "done" | "error";
@@ -109,6 +116,8 @@ let busy = false;
 let notice: { kind: "info" | "error"; text: string } | null = null;
 let updates: Updates | null = null;
 let checking = false;
+let appUpdate: AppUpdate | null = null;
+let checkingApp = false;
 let job: Job | null = null;
 /** Offer picked in each tool's download list, kept across re-renders. */
 const chosenOffer: Record<string, string> = {};
@@ -264,6 +273,20 @@ async function checkUpdates() {
     notice = { kind: "error", text: String(e) };
   } finally {
     checking = false;
+    render();
+  }
+}
+
+async function checkAppUpdate() {
+  if (checkingApp) return;
+  checkingApp = true;
+  render();
+  try {
+    appUpdate = await invoke<AppUpdate>("check_app_update");
+  } catch (e) {
+    notice = { kind: "error", text: String(e) };
+  } finally {
+    checkingApp = false;
     render();
   }
 }
@@ -603,6 +626,7 @@ function settingsTab(s: AppState, dis: string): string {
       <div class="options">
         ${toggle("withWindows", s.startup.withWindows, t("startWithWindows"), t("startWithWindowsHint"), dis)}
         ${toggle("restoreServices", s.startup.restoreServices, t("restoreServices"), t("restoreServicesHint"), dis)}
+        ${toggle("checkAppUpdates", s.startup.checkAppUpdates, t("checkAppUpdates"), t("checkAppUpdatesHint"), dis)}
       </div>
     </section>
 
@@ -638,7 +662,19 @@ function settingsTab(s: AppState, dis: string): string {
         ${esc(t("supportText"))}
         <button class="link" data-open="support" ${tip(t("supportHint"))}>☕️ ${esc(t("supportLink"))}</button>
       </p>
+      <p>
+        <button data-action="check_app" ${checkingApp ? "disabled" : ""}>${esc(t(checkingApp ? "checking" : "checkAppUpdate"))}</button>
+        ${appUpdateStatus()}
+      </p>
     </section>`;
+}
+
+/** Result of the last Stackyard update check, next to its button in Settings > About. */
+function appUpdateStatus(): string {
+  if (!appUpdate) return "";
+  if (!appUpdate.newer) return `<span>${esc(t("appUpToDate"))}</span>`;
+  return `<span>${esc(t("appUpdateAvailable", { version: appUpdate.latest }))}</span>
+    <button class="link" data-open="release" ${tip(t("appUpdateHint"))}>${esc(t("appDownloadPage"))}</button>`;
 }
 
 function servicesTab(s: AppState, dis: string): string {
@@ -728,6 +764,13 @@ function render() {
   app.innerHTML = `
     <header>
       <h1>${esc(t("appName"))} <span class="version">${esc(state.version)}</span></h1>
+      ${
+        appUpdate?.newer
+          ? `<button class="tag ours app-update" data-open="release" ${tip(t("appUpdateHint"))}>${esc(
+              t("appUpdateBadge", { version: appUpdate.latest }),
+            )}</button>`
+          : ""
+      }
       <button class="link" data-open="root" title="${esc(t("openRoot"))}">
         ${esc(t("root"))}: <code>${esc(state.root)}</code>
       </button>
@@ -820,6 +863,8 @@ app.addEventListener("click", (ev) => {
       return openTerminal();
     case "check_updates":
       return checkUpdates();
+    case "check_app":
+      return checkAppUpdate();
     case "dismiss_job":
       return dismissJob();
     case "quit":
@@ -886,7 +931,11 @@ app.addEventListener("change", (ev) => {
   const el = ev.target as HTMLInputElement | HTMLSelectElement;
   const term = el.dataset.terminal;
   if (el.dataset.startup && state) {
-    run("set_startup", { ...state.startup, [el.dataset.startup]: (el as HTMLInputElement).checked });
+    const on = (el as HTMLInputElement).checked;
+    // Switching the daily check on checks right away (the daily one then starts from here).
+    run("set_startup", { ...state.startup, [el.dataset.startup]: on }).then((ok) => {
+      if (ok && on && el.dataset.startup === "checkAppUpdates") checkAppUpdate();
+    });
   } else if (el.dataset.ui && state) {
     const { theme, language } = state.ui;
     run("set_ui", el.dataset.ui === "theme" ? { theme: el.value, language } : { theme, language: el.value });
@@ -904,6 +953,12 @@ app.addEventListener("change", (ev) => {
   }
 });
 
+// The daily check (Settings > Startup) runs in the backend, also while the window is hidden.
+listen<AppUpdate>("app-update", (ev) => {
+  appUpdate = ev.payload;
+  render();
+}).catch(() => {});
+
 render();
 // `npm run dev` in a plain browser: a fake backend, to preview the UI without building (see mock.ts).
 const backend = import.meta.env.DEV && !("__TAURI_INTERNALS__" in window) ? import("./mock") : Promise.resolve();
@@ -913,12 +968,14 @@ backend.then(() => Promise.all([
   invoke<ServiceInfo[]>("get_services"),
   invoke<Job | null>("get_download"),
   invoke<Updates | null>("get_updates"),
+  invoke<AppUpdate | null>("get_app_update"),
 ]))
-  .then(([s, svcs, j, u]) => {
+  .then(([s, svcs, j, u, a]) => {
     adopt(s);
     services = svcs;
     job = j;
     updates = u;
+    appUpdate = a;
     pollJob();
   })
   .catch((e) => (notice = { kind: "error", text: String(e) }))

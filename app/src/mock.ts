@@ -34,8 +34,8 @@ const state = {
   mainUrl: "http://localhost/",
   ports: { apache: 80, mysql: 3306, postgresql: 5432 },
   adminerUrl: "http://localhost/adminer/" as string | null,
-  startup: { withWindows: false, restoreServices: true },
-  version: "1.0.1",
+  startup: { withWindows: false, restoreServices: true, checkAppUpdates: false },
+  version: "1.0.2",
   settingsRecovered: null as string | null,
   ui: { theme: "system", language: "system", locale: "en", systemLocale: "en" },
 };
@@ -95,7 +95,7 @@ const handlers: Record<string, (a: Args) => unknown> = {
     return state;
   },
   set_startup: (a) => {
-    state.startup = { withWindows: a.withWindows, restoreServices: a.restoreServices };
+    state.startup = { withWindows: a.withWindows, restoreServices: a.restoreServices, checkAppUpdates: a.checkAppUpdates };
     return state;
   },
   set_ports: (a) => {
@@ -129,6 +129,12 @@ const handlers: Record<string, (a: Args) => unknown> = {
     };
   },
   get_updates: () => null,
+  check_app_update: async () => {
+    await delay(500);
+    return { latest: "1.0.2", newer: true };
+  },
+  get_app_update: () => null,
+  "plugin:event|listen": () => 0,
   get_download: () => null,
   download_tool: () => {
     throw "Downloads are not simulated in the preview.";
